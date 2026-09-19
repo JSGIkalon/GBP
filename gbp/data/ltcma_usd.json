@@ -1,0 +1,419 @@
+{
+  "source": "J.P. Morgan 2026 Long-Term Capital Market Assumptions (USD) — ltcma-full-report.pdf",
+  "note": "El LTCMA no publica yield por clase de activo; se deja en cero para que se ingrese a mano en la librería de CMAs.",
+  "assets": [
+    {
+      "name": "U.S. Inflation",
+      "compound_return": 0.025,
+      "arithmetic_return": 0.0252,
+      "volatility": 0.0177,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Cash",
+      "compound_return": 0.031,
+      "arithmetic_return": 0.031,
+      "volatility": 0.0067,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Intermediate Treasuries",
+      "compound_return": 0.04,
+      "arithmetic_return": 0.0406,
+      "volatility": 0.0348,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Long Treasuries",
+      "compound_return": 0.049,
+      "arithmetic_return": 0.056900000000000006,
+      "volatility": 0.13019999999999998,
+      "yield": 0.0
+    },
+    {
+      "name": "TIPS",
+      "compound_return": 0.043,
+      "arithmetic_return": 0.0447,
+      "volatility": 0.0588,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Aggregate Bonds",
+      "compound_return": 0.048,
+      "arithmetic_return": 0.049100000000000005,
+      "volatility": 0.047599999999999996,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Securitized",
+      "compound_return": 0.052000000000000005,
+      "arithmetic_return": 0.0528,
+      "volatility": 0.04190000000000001,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Short Duration Government/Credit",
+      "compound_return": 0.04,
+      "arithmetic_return": 0.0401,
+      "volatility": 0.0163,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Long Duration Government/Credit",
+      "compound_return": 0.052000000000000005,
+      "arithmetic_return": 0.0581,
+      "volatility": 0.11449999999999999,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Inv Grade Corporate Bonds",
+      "compound_return": 0.052000000000000005,
+      "arithmetic_return": 0.0546,
+      "volatility": 0.0739,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Long Corporate Bonds",
+      "compound_return": 0.054000000000000006,
+      "arithmetic_return": 0.061,
+      "volatility": 0.12279999999999999,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. High Yield Bonds",
+      "compound_return": 0.061,
+      "arithmetic_return": 0.0646,
+      "volatility": 0.0874,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Leveraged Loans",
+      "compound_return": 0.066,
+      "arithmetic_return": 0.0688,
+      "volatility": 0.077,
+      "yield": 0.0
+    },
+    {
+      "name": "World Government Bonds hedged",
+      "compound_return": 0.043,
+      "arithmetic_return": 0.0438,
+      "volatility": 0.04019999999999999,
+      "yield": 0.0
+    },
+    {
+      "name": "World Government Bonds",
+      "compound_return": 0.043,
+      "arithmetic_return": 0.0455,
+      "volatility": 0.0727,
+      "yield": 0.0
+    },
+    {
+      "name": "World ex-U.S. Government Bonds hedged",
+      "compound_return": 0.042,
+      "arithmetic_return": 0.042699999999999995,
+      "volatility": 0.0395,
+      "yield": 0.0
+    },
+    {
+      "name": "World ex-U.S. Government Bonds",
+      "compound_return": 0.043,
+      "arithmetic_return": 0.046900000000000004,
+      "volatility": 0.0906,
+      "yield": 0.0
+    },
+    {
+      "name": "Emerging Markets Sovereign Debt",
+      "compound_return": 0.063,
+      "arithmetic_return": 0.0666,
+      "volatility": 0.0883,
+      "yield": 0.0
+    },
+    {
+      "name": "Emerging Markets Local Currency Debt",
+      "compound_return": 0.067,
+      "arithmetic_return": 0.0738,
+      "volatility": 0.12119999999999999,
+      "yield": 0.0
+    },
+    {
+      "name": "Emerging Markets Corporate Bonds",
+      "compound_return": 0.061,
+      "arithmetic_return": 0.0637,
+      "volatility": 0.0764,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Muni 1-15 Yr Blend",
+      "compound_return": 0.038,
+      "arithmetic_return": 0.0388,
+      "volatility": 0.0416,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Muni High Yield",
+      "compound_return": 0.053,
+      "arithmetic_return": 0.056600000000000004,
+      "volatility": 0.0872,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Large Cap",
+      "compound_return": 0.067,
+      "arithmetic_return": 0.0794,
+      "volatility": 0.16469999999999999,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Mid Cap",
+      "compound_return": 0.07,
+      "arithmetic_return": 0.0855,
+      "volatility": 0.1856,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Small Cap",
+      "compound_return": 0.069,
+      "arithmetic_return": 0.0889,
+      "volatility": 0.21100000000000002,
+      "yield": 0.0
+    },
+    {
+      "name": "Euro Area Large Cap",
+      "compound_return": 0.078,
+      "arithmetic_return": 0.09939999999999999,
+      "volatility": 0.22039999999999998,
+      "yield": 0.0
+    },
+    {
+      "name": "Japanese Equity",
+      "compound_return": 0.08800000000000001,
+      "arithmetic_return": 0.09910000000000001,
+      "volatility": 0.1577,
+      "yield": 0.0
+    },
+    {
+      "name": "Hong Kong Equity",
+      "compound_return": 0.07400000000000001,
+      "arithmetic_return": 0.0943,
+      "volatility": 0.2137,
+      "yield": 0.0
+    },
+    {
+      "name": "UK Large Cap",
+      "compound_return": 0.066,
+      "arithmetic_return": 0.0799,
+      "volatility": 0.1752,
+      "yield": 0.0
+    },
+    {
+      "name": "EAFE Equity",
+      "compound_return": 0.075,
+      "arithmetic_return": 0.08900000000000001,
+      "volatility": 0.17629999999999998,
+      "yield": 0.0
+    },
+    {
+      "name": "Chinese Domestic Equity",
+      "compound_return": 0.077,
+      "arithmetic_return": 0.11230000000000001,
+      "volatility": 0.287,
+      "yield": 0.0
+    },
+    {
+      "name": "Emerging Markets Equity",
+      "compound_return": 0.078,
+      "arithmetic_return": 0.0974,
+      "volatility": 0.20929999999999999,
+      "yield": 0.0
+    },
+    {
+      "name": "AC Asia ex-Japan Equity",
+      "compound_return": 0.079,
+      "arithmetic_return": 0.0983,
+      "volatility": 0.2084,
+      "yield": 0.0
+    },
+    {
+      "name": "AC World Equity",
+      "compound_return": 0.07,
+      "arithmetic_return": 0.0828,
+      "volatility": 0.1678,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Equity Value Factor",
+      "compound_return": 0.077,
+      "arithmetic_return": 0.0911,
+      "volatility": 0.177,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Equity Momentum Factor",
+      "compound_return": 0.076,
+      "arithmetic_return": 0.0891,
+      "volatility": 0.17059999999999997,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Equity Quality Factor",
+      "compound_return": 0.066,
+      "arithmetic_return": 0.0764,
+      "volatility": 0.15109999999999998,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Equity Minimum Volatility Factor",
+      "compound_return": 0.07,
+      "arithmetic_return": 0.0779,
+      "volatility": 0.1316,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Equity Dividend Yield Factor",
+      "compound_return": 0.075,
+      "arithmetic_return": 0.08710000000000001,
+      "volatility": 0.1636,
+      "yield": 0.0
+    },
+    {
+      "name": "Global Convertible Bonds hedged",
+      "compound_return": 0.067,
+      "arithmetic_return": 0.0728,
+      "volatility": 0.1117,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Core Real Estate",
+      "compound_return": 0.08199999999999999,
+      "arithmetic_return": 0.08789999999999999,
+      "volatility": 0.1139,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. Value-Added Real Estate",
+      "compound_return": 0.10099999999999999,
+      "arithmetic_return": 0.11720000000000001,
+      "volatility": 0.1923,
+      "yield": 0.0
+    },
+    {
+      "name": "European Core Real Estate",
+      "compound_return": 0.069,
+      "arithmetic_return": 0.07769999999999999,
+      "volatility": 0.1375,
+      "yield": 0.0
+    },
+    {
+      "name": "Asia Pacific Core Real Estate",
+      "compound_return": 0.084,
+      "arithmetic_return": 0.0955,
+      "volatility": 0.1598,
+      "yield": 0.0
+    },
+    {
+      "name": "U.S. REITs",
+      "compound_return": 0.08800000000000001,
+      "arithmetic_return": 0.1015,
+      "volatility": 0.174,
+      "yield": 0.0
+    },
+    {
+      "name": "Commercial Mortgage Loans",
+      "compound_return": 0.062,
+      "arithmetic_return": 0.065,
+      "volatility": 0.0794,
+      "yield": 0.0
+    },
+    {
+      "name": "Global Core Infrastructure",
+      "compound_return": 0.065,
+      "arithmetic_return": 0.0699,
+      "volatility": 0.1025,
+      "yield": 0.0
+    },
+    {
+      "name": "Global Core Transport",
+      "compound_return": 0.079,
+      "arithmetic_return": 0.0864,
+      "volatility": 0.1277,
+      "yield": 0.0
+    },
+    {
+      "name": "Global Timberland",
+      "compound_return": 0.063,
+      "arithmetic_return": 0.06709999999999999,
+      "volatility": 0.09380000000000001,
+      "yield": 0.0
+    },
+    {
+      "name": "Commodities",
+      "compound_return": 0.046,
+      "arithmetic_return": 0.061500000000000006,
+      "volatility": 0.1832,
+      "yield": 0.0
+    },
+    {
+      "name": "Gold",
+      "compound_return": 0.055,
+      "arithmetic_return": 0.0678,
+      "volatility": 0.1668,
+      "yield": 0.0
+    },
+    {
+      "name": "Private Equity",
+      "compound_return": 0.102,
+      "arithmetic_return": 0.1191,
+      "volatility": 0.1978,
+      "yield": 0.0
+    },
+    {
+      "name": "Venture Capital",
+      "compound_return": 0.085,
+      "arithmetic_return": 0.1066,
+      "volatility": 0.222,
+      "yield": 0.0
+    },
+    {
+      "name": "Diversified Hedge Funds",
+      "compound_return": 0.053,
+      "arithmetic_return": 0.0546,
+      "volatility": 0.0575,
+      "yield": 0.0
+    },
+    {
+      "name": "Event Driven Hedge Funds",
+      "compound_return": 0.052000000000000005,
+      "arithmetic_return": 0.055,
+      "volatility": 0.0801,
+      "yield": 0.0
+    },
+    {
+      "name": "Long Bias Hedge Funds",
+      "compound_return": 0.055,
+      "arithmetic_return": 0.0608,
+      "volatility": 0.1112,
+      "yield": 0.0
+    },
+    {
+      "name": "Relative Value Hedge Funds",
+      "compound_return": 0.057,
+      "arithmetic_return": 0.0584,
+      "volatility": 0.0536,
+      "yield": 0.0
+    },
+    {
+      "name": "Macro Hedge Funds",
+      "compound_return": 0.040999999999999995,
+      "arithmetic_return": 0.0433,
+      "volatility": 0.0697,
+      "yield": 0.0
+    },
+    {
+      "name": "Direct Lending",
+      "compound_return": 0.077,
+      "arithmetic_return": 0.0859,
+      "volatility": 0.1401,
+      "yield": 0.0
+    }
+  ]
+}

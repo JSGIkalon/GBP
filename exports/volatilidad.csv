@@ -1,0 +1,60 @@
+﻿Clase de activo;Volatilidad
+U.S. Inflation;0.0177
+U.S. Cash;0.0067
+U.S. Intermediate Treasuries;0.0348
+U.S. Long Treasuries;0.13019999999999998
+TIPS;0.0588
+U.S. Aggregate Bonds;0.047599999999999996
+U.S. Securitized;0.04190000000000001
+U.S. Short Duration Government/Credit;0.0163
+U.S. Long Duration Government/Credit;0.11449999999999999
+U.S. Inv Grade Corporate Bonds;0.0739
+U.S. Long Corporate Bonds;0.12279999999999999
+U.S. High Yield Bonds;0.0874
+U.S. Leveraged Loans;0.077
+World Government Bonds hedged;0.04019999999999999
+World Government Bonds;0.0727
+World ex-U.S. Government Bonds hedged;0.0395
+World ex-U.S. Government Bonds;0.0906
+Emerging Markets Sovereign Debt;0.0883
+Emerging Markets Local Currency Debt;0.12119999999999999
+Emerging Markets Corporate Bonds;0.0764
+U.S. Muni 1-15 Yr Blend;0.0416
+U.S. Muni High Yield;0.0872
+U.S. Large Cap;0.16469999999999999
+U.S. Mid Cap;0.1856
+U.S. Small Cap;0.21100000000000002
+Euro Area Large Cap;0.22039999999999998
+Japanese Equity;0.1577
+Hong Kong Equity;0.2137
+UK Large Cap;0.1752
+EAFE Equity;0.17629999999999998
+Chinese Domestic Equity;0.287
+Emerging Markets Equity;0.20929999999999999
+AC Asia ex-Japan Equity;0.2084
+AC World Equity;0.1678
+U.S. Equity Value Factor;0.177
+U.S. Equity Momentum Factor;0.17059999999999997
+U.S. Equity Quality Factor;0.15109999999999998
+U.S. Equity Minimum Volatility Factor;0.1316
+U.S. Equity Dividend Yield Factor;0.1636
+Global Convertible Bonds hedged;0.1117
+U.S. Core Real Estate;0.1139
+U.S. Value-Added Real Estate;0.1923
+European Core Real Estate;0.1375
+Asia Pacific Core Real Estate;0.1598
+U.S. REITs;0.174
+Commercial Mortgage Loans;0.0794
+Global Core Infrastructure;0.1025
+Global Core Transport;0.1277
+Global Timberland;0.09380000000000001
+Commodities;0.1832
+Gold;0.1668
+Private Equity;0.1978
+Venture Capital;0.222
+Diversified Hedge Funds;0.0575
+Event Driven Hedge Funds;0.0801
+Long Bias Hedge Funds;0.1112
+Relative Value Hedge Funds;0.0536
+Macro Hedge Funds;0.0697
+Direct Lending;0.1401
