@@ -31,9 +31,11 @@ from PySide6.QtWidgets import (
 
 from ...model.allocation import Allocation
 from ...model.assets import CMASet
+from ...model.groups import group_weights
 from ...model.scenario import Scenario
 from ...model.strategy import Strategy
 from ..theme import (
+    BLUE_MID,
     INK_SOFT,
     MAX_SERIES,
     STATUS_CRITICAL,
@@ -51,11 +53,15 @@ class StrategiesPanel(QWidget):
 
     changed = Signal()
 
-    def __init__(self, scenario: Scenario, cmas: CMASet, available: list[str], parent=None):
+    def __init__(self, scenario: Scenario, cmas: CMASet, available: list[str],
+                 resolver=None, parent=None):
         super().__init__(parent)
         self.scenario = scenario
         self.cmas = cmas
         self.available = available
+        # Sin resolvedor la vista agrupada clasifica por palabras clave, que es
+        # lo correcto mientras no haya activos propios.
+        self.resolver = resolver
         self._loading = False
 
         layout = QVBoxLayout(self)
@@ -72,7 +78,7 @@ class StrategiesPanel(QWidget):
         layout.addLayout(self._build_selector())
         layout.addWidget(self._build_editor(), 1)
 
-        self.reload(scenario, cmas, available)
+        self.reload(scenario, cmas, available, resolver)
 
     # ------------------------------------------------------------------
     def _build_selector(self) -> QVBoxLayout:
@@ -101,6 +107,7 @@ class StrategiesPanel(QWidget):
             ("Duplicar", self._duplicate_strategy),
             ("Renombrar", self._rename_strategy),
             ("Eliminar", self._remove_strategy),
+            ("Borrar todas", self._remove_all_strategies),
         ):
             button = QPushButton(text)
             button.clicked.connect(slot)
@@ -176,13 +183,41 @@ class StrategiesPanel(QWidget):
         self.total_label.setWordWrap(True)  # la frase completa no cabe en una línea
         column.addWidget(self.total_label)
 
+        # Vista agrupada: 59 sub-clases no se leen en comité, cuatro sí. Es
+        # derivada y de solo lectura — los pesos se cargan por sub-clase, que es
+        # el nivel al que existen retorno, volatilidad y correlación.
+        grouped_label = QLabel("POR CLASE DE ACTIVO")
+        grouped_label.setStyleSheet(
+            f"color: {BLUE_MID}; font-weight: 600; letter-spacing: 2px; font-size: 12px;"
+        )
+        column.addWidget(grouped_label)
+
+        self.grouped_table = QTableWidget(0, 2)
+        self.grouped_table.setHorizontalHeaderLabels(["Clase de activo", "Peso %"])
+        self.grouped_table.verticalHeader().setVisible(False)
+        self.grouped_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.grouped_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.grouped_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.grouped_table.verticalHeader().setDefaultSectionSize(26)
+        grouped_header = self.grouped_table.horizontalHeader()
+        grouped_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        grouped_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self.grouped_table.setColumnWidth(1, 90)
+        # Alto fijo: son cuatro grupos como mucho, y una tabla que estira le
+        # robaria espacio a la de pesos, que es donde se trabaja.
+        self.grouped_table.setMaximumHeight(5 * 26 + 34)
+        column.addWidget(self.grouped_table)
+
         return tab
 
     # ------------------------------------------------------------------
-    def reload(self, scenario: Scenario, cmas: CMASet, available: list[str]):
+    def reload(self, scenario: Scenario, cmas: CMASet, available: list[str],
+               resolver=None):
         self.scenario = scenario
         self.cmas = cmas
         self.available = available
+        if resolver is not None:
+            self.resolver = resolver
         self._refresh_list()
         if self.scenario.strategies:
             self.selector.setCurrentIndex(0)
@@ -312,8 +347,25 @@ class StrategiesPanel(QWidget):
         self._render_weights(strategy)
         self.changed.emit()
 
+    def _render_grouped(self, strategy: Strategy | None):
+        grouped = (
+            group_weights(strategy.weights, self.resolver)
+            if strategy is not None
+            else {}
+        )
+        self.grouped_table.setRowCount(len(grouped))
+        for row, (name, weight) in enumerate(grouped.items()):
+            label = QTableWidgetItem(name)
+            self.grouped_table.setItem(row, 0, label)
+            value = QTableWidgetItem(f"{weight * 100:.1f}")
+            value.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            self.grouped_table.setItem(row, 1, value)
+
     def _update_total(self):
         strategy = self.current
+        self._render_grouped(strategy)
         if strategy is None:
             self.total_label.setText(
                 f"<span style='color:{INK_SOFT};'>Sin estrategia seleccionada.</span>"
@@ -448,6 +500,31 @@ class StrategiesPanel(QWidget):
         ) != QMessageBox.StandardButton.Yes:
             return
         self.scenario.strategies.pop(row)
+        self._refresh_list()
+        self._render_current()
+        self.changed.emit()
+
+    def _remove_all_strategies(self):
+        """Vacía la comparación para empezar de cero sin crear un caso nuevo.
+
+        A diferencia de «Nuevo caso», conserva capital, horizonte e inflación:
+        lo normal al rehacer una comparación es cambiar las estrategias, no el
+        escenario.
+        """
+        total = len(self.scenario.strategies)
+        if not total:
+            return
+        if QMessageBox.question(
+            self,
+            "Borrar todas las estrategias",
+            f"¿Borrar las {total} estrategias con sus pesos, flujos y créditos?\n\n"
+            "El capital, el horizonte y la inflación del escenario se conservan. "
+            "Esto no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.scenario.strategies.clear()
         self._refresh_list()
         self._render_current()
         self.changed.emit()

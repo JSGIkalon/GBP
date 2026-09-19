@@ -19,7 +19,7 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
-from ..model.assets import AssetClass, CMASet
+from ..model.assets import ORIGIN_CUSTOM, ORIGIN_LTCMA, AssetClass, CMASet
 from ..model.correlation import data_dir
 from ..model.scenario import SimulationSettings
 
@@ -27,6 +27,10 @@ APP_DIR_NAME = Path("Ikalon") / "GBP"
 LIBRARY_FILE = "cma_library.json"
 SETTINGS_FILE = "settings.json"
 SCHEMA_VERSION = 2
+# La librería pasó a 3 al aparecer los activos propios: cada clase declara su
+# origen y, si es propia, su clase de activo. Un archivo de esquema 2 se lee sin
+# migración porque todo lo que no dice su origen es del LTCMA, que es lo que era.
+LIBRARY_SCHEMA_VERSION = 3
 
 # Años hito que traía la versión anterior. Si el archivo guardado tiene
 # exactamente estos valores, el usuario nunca los tocó: se migran al nuevo
@@ -81,17 +85,55 @@ def load_cmas() -> CMASet:
         return cmas
 
     payload = json.loads(path.read_text(encoding="utf-8"))
-    return CMASet(
-        [
-            AssetClass(
-                name=entry["name"],
-                compound_return=float(entry["compound_return"]),
-                volatility=float(entry["volatility"]),
-                yield_=float(entry.get("yield_", entry.get("yield", 0.0))),
-            )
-            for entry in payload.get("assets", [])
-        ]
+    return CMASet([asset_from_dict(entry) for entry in payload.get("assets", [])])
+
+
+def asset_from_dict(entry: dict) -> AssetClass:
+    """Una clase de activo desde su forma serializada, tolerante con lo viejo.
+
+    Un esquema 2 no trae `origin`, así que todo queda como LTCMA — que es
+    exactamente lo que era. Y una clase declarada desconocida **no levanta**:
+    degrada a clase del LTCMA y la interfaz la mostrará para que se corrija. Una
+    librería rara no puede impedir que la app abra.
+    """
+    from ..model.groups import GROUP_ORDER
+
+    origin = entry.get("origin", ORIGIN_LTCMA)
+    asset_class = entry.get("asset_class")
+    if origin == ORIGIN_CUSTOM and asset_class not in GROUP_ORDER:
+        origin, asset_class = ORIGIN_LTCMA, None
+
+    return AssetClass(
+        name=entry["name"],
+        compound_return=float(entry["compound_return"]),
+        volatility=float(entry["volatility"]),
+        yield_=float(entry.get("yield_", entry.get("yield", 0.0))),
+        origin=origin,
+        asset_class=asset_class,
+        notes=str(entry.get("notes", "")),
     )
+
+
+def asset_to_dict(asset: AssetClass, with_origin: bool = True) -> dict:
+    """Forma serializada de una clase de activo.
+
+    Los campos de activo propio se **omiten** cuando no aplican, en vez de
+    escribirse en `null`: así un archivo de una librería sin activos propios es
+    byte a byte el de siempre.
+    """
+    payload = {
+        "name": asset.name,
+        "compound_return": asset.compound_return,
+        "volatility": asset.volatility,
+        "yield_": asset.yield_,
+    }
+    if with_origin:
+        payload["origin"] = asset.origin
+    if asset.is_custom:
+        payload["asset_class"] = asset.asset_class
+    if asset.notes:
+        payload["notes"] = asset.notes
+    return payload
 
 
 def save_cmas(cmas: CMASet) -> Path:
@@ -100,26 +142,48 @@ def save_cmas(cmas: CMASet) -> Path:
     _write_atomic(
         path,
         {
-            "schema": SCHEMA_VERSION,
-            "assets": [
-                {
-                    "name": a.name,
-                    "compound_return": a.compound_return,
-                    "volatility": a.volatility,
-                    "yield_": a.yield_,
-                }
-                for a in cmas
-            ],
+            "schema": LIBRARY_SCHEMA_VERSION,
+            "assets": [asset_to_dict(a) for a in cmas],
         },
     )
     return path
 
 
-def reset_cmas_to_ltcma() -> CMASet:
-    """Vuelve a los supuestos del LTCMA, descartando las ediciones manuales."""
+def reset_cmas_to_ltcma(keep_custom: bool = True) -> CMASet:
+    """Vuelve a los supuestos del LTCMA.
+
+    **Conserva los activos propios**, que no vienen del LTCMA: reimportarlo no
+    puede ser motivo para borrarlos, y hacerlo dejaría casos guardados
+    imposibles de abrir. Se borran solo uno a uno, desde su propio botón.
+
+    Si al reimportar el LTCMA apareciera una clase nueva con el mismo nombre que
+    un activo propio, gana el LTCMA y el propio se renombra: perder el supuesto
+    del analista en silencio sería peor que un nombre feo.
+    """
     cmas = seed_cmas()
+    if not keep_custom:
+        save_cmas(cmas)
+        return cmas
+
+    previos = load_cmas().custom if library_path().exists() else []
+    for propio in previos:
+        if propio.name in cmas.names:
+            propio.name = f"{propio.name} (propio)"
+        cmas.add(propio)
+
     save_cmas(cmas)
     return cmas
+
+
+def delete_custom_asset(cmas: CMASet, name: str) -> Path:
+    """Borra un activo propio de la librería. Los del LTCMA no se tocan."""
+    asset = cmas.by_name(name)
+    if not asset.is_custom:
+        raise ValueError(
+            f"'{name}' viene del LTCMA y no se puede borrar desde la app."
+        )
+    cmas.remove(name)
+    return save_cmas(cmas)
 
 
 def settings_path() -> Path:

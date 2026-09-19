@@ -223,6 +223,18 @@ def simulate(
     if cash_asset not in names and cash_asset in cmas.names and cash_asset in correlations.names:
         names = names + [cash_asset]
 
+    # `subset` levantaría un KeyError, que es correcto como red de programador
+    # pero ilegible para quien abrió un caso de otra máquina. Aquí se convierte
+    # en un error de dominio que dice qué hacer.
+    missing = [n for n in names if n not in correlations.names]
+    if missing:
+        raise ValueError(
+            "La matriz de correlación no cubre estas clases de activo: "
+            + ", ".join(missing)
+            + ". Si el caso viene de otro computador, vuelve a abrirlo y acepta "
+            "añadir sus activos propios a tu librería."
+        )
+
     corr_full = correlations.subset(names)
     rng = np.random.default_rng(settings.seed)
 

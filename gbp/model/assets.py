@@ -23,18 +23,33 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+# Procedencia de una clase de activo. La distinción no es cosmética: las del
+# LTCMA son idénticas en todas las máquinas porque viajan como recurso embebido,
+# mientras que las propias las declara el analista y por eso tienen que viajar
+# dentro del caso (ver `gbp.io.caseio`).
+ORIGIN_LTCMA = "ltcma"
+ORIGIN_CUSTOM = "custom"
+
 
 @dataclass
 class AssetClass:
     """Supuestos de largo plazo para una clase de activo.
 
     Todos los porcentajes se expresan en forma decimal (0.069 = 6.9%).
+
+    Una clase **propia** —patrimonio que el LTCMA no cubre, como renta fija
+    colombiana— declara además a qué clase de activo pertenece. Esa declaración
+    es la que permite derivarle correlaciones y shocks de estrés, porque no los
+    tiene publicados: ver `gbp.model.custom_assets`.
     """
 
     name: str
     compound_return: float
     volatility: float
     yield_: float = 0.0
+    origin: str = ORIGIN_LTCMA
+    asset_class: str | None = None
+    notes: str = ""
 
     def __post_init__(self) -> None:
         if not self.name or not self.name.strip():
@@ -44,6 +59,37 @@ class AssetClass:
             raise ValueError(f"{self.name}: la volatilidad no puede ser negativa.")
         if self.compound_return <= -1:
             raise ValueError(f"{self.name}: el retorno compuesto debe ser mayor a -100%.")
+
+        if self.origin not in (ORIGIN_LTCMA, ORIGIN_CUSTOM):
+            raise ValueError(
+                f"{self.name}: origen desconocido '{self.origin}'; "
+                f"debe ser '{ORIGIN_LTCMA}' o '{ORIGIN_CUSTOM}'."
+            )
+
+        if self.origin == ORIGIN_CUSTOM:
+            # Se importa aquí y no arriba para que `groups` no tenga que
+            # importarse siempre: `assets` es la base de casi todo el modelo.
+            from .groups import GROUP_ORDER, OTHER
+
+            if self.asset_class == OTHER:
+                raise ValueError(
+                    f"{self.name}: '{OTHER}' no sirve como clase declarada. Es el "
+                    "cajón de lo que no se pudo clasificar, así que no tiene "
+                    "miembros del LTCMA de los que derivar correlaciones."
+                )
+            if self.asset_class not in GROUP_ORDER:
+                raise ValueError(
+                    f"{self.name}: un activo propio debe declarar su clase de activo, "
+                    f"una de {GROUP_ORDER}; llegó {self.asset_class!r}."
+                )
+        else:
+            # La clase de una clase del LTCMA se deduce de su nombre; guardarla
+            # abriría la puerta a que las dos fuentes se contradigan.
+            self.asset_class = None
+
+    @property
+    def is_custom(self) -> bool:
+        return self.origin == ORIGIN_CUSTOM
 
     @property
     def sigma_log(self) -> float:
@@ -142,3 +188,13 @@ class CMASet:
     def subset(self, names: list[str]) -> "CMASet":
         """Devuelve un CMASet con las clases indicadas, en ese orden."""
         return CMASet([self.by_name(n) for n in names])
+
+    @property
+    def custom(self) -> list[AssetClass]:
+        """Las clases declaradas por el analista, en orden."""
+        return [a for a in self.assets if a.is_custom]
+
+    @property
+    def ltcma(self) -> list[AssetClass]:
+        """Las clases que vienen del LTCMA."""
+        return [a for a in self.assets if not a.is_custom]

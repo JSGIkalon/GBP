@@ -464,3 +464,154 @@ def test_el_boton_de_exportar_arranca_deshabilitado_y_se_habilita_al_simular(win
 
     window.new_case()
     assert not window.export_action.isEnabled()
+
+
+# --------------------------------------------------------------------------
+# Sesion anterior y borrado masivo
+# --------------------------------------------------------------------------
+
+
+def test_la_sesion_se_restaura_al_reabrir(qapp, tmp_path, monkeypatch):
+    """Cerrar y volver a abrir no debe devolver el caso de ejemplo."""
+    monkeypatch.setenv("GBP_DATA_DIR", str(tmp_path))
+    from gbp.ui.main_window import MainWindow
+
+    primera = MainWindow()
+    primera.scenario.name = "Caso del cliente"
+    primera.scenario.initial_value = 42_000_000.0
+    del primera.scenario.strategies[1:]
+    primera.scenario.strategies[0].name = "La unica"
+    primera.close()
+
+    segunda = MainWindow()
+    try:
+        assert segunda.scenario.name == "Caso del cliente"
+        assert segunda.scenario.initial_value == pytest.approx(42_000_000.0)
+        assert [s.name for s in segunda.scenario.strategies] == ["La unica"]
+        assert segunda.strategies_panel.selector.count() == 1
+    finally:
+        segunda.close()
+
+
+def test_sin_sesion_previa_se_abre_el_caso_de_ejemplo(qapp, tmp_path, monkeypatch):
+    monkeypatch.setenv("GBP_DATA_DIR", str(tmp_path / "vacio"))
+    from gbp.ui.main_window import MainWindow
+
+    win = MainWindow()
+    try:
+        assert len(win.scenario.strategies) == 3  # el caso de ejemplo
+    finally:
+        win.close()
+
+
+def test_una_sesion_ilegible_no_impide_abrir(qapp, tmp_path, monkeypatch):
+    monkeypatch.setenv("GBP_DATA_DIR", str(tmp_path))
+    from gbp.io import library
+    from gbp.ui.main_window import MainWindow
+
+    library.session_path().parent.mkdir(parents=True, exist_ok=True)
+    library.session_path().write_text("{ esto no es json", encoding="utf-8")
+
+    win = MainWindow()
+    try:
+        assert win.scenario.strategies  # cae al caso de ejemplo, no revienta
+    finally:
+        win.close()
+
+
+def test_empezar_de_cero_vacia_el_caso_y_olvida_la_sesion(qapp, tmp_path, monkeypatch):
+    """El boton de «Empezar de cero» tiene que romper la cadena de restauracion.
+
+    El caso de ejemplo se carga la primera vez y desde entonces la sesion lo
+    restaura fielmente: sin esto, las tres estrategias de ejemplo vuelven para
+    siempre y no hay forma de sacarlas todas desde la app.
+    """
+    monkeypatch.setenv("GBP_DATA_DIR", str(tmp_path))
+    from PySide6.QtWidgets import QMessageBox
+
+    from gbp.io import library
+    from gbp.ui.main_window import MainWindow
+
+    primera = MainWindow()
+    assert len(primera.scenario.strategies) == 3  # el caso de ejemplo
+
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
+    )
+    primera.scenario_panel.reset_button.click()
+
+    assert primera.scenario.initial_value == 0.0
+    assert [s.name for s in primera.scenario.strategies] == ["Estrategia 1"]
+    assert not primera.scenario.strategies[0].weights
+    primera.close()
+
+    segunda = MainWindow()
+    try:
+        # No vuelven ni las estrategias de ejemplo ni el capital anterior.
+        assert [s.name for s in segunda.scenario.strategies] == ["Estrategia 1"]
+        assert segunda.scenario.initial_value == 0.0
+    finally:
+        segunda.close()
+
+    assert library.load_report_defaults() is not None  # lo demas no se toca
+
+
+def test_el_capital_avisa_cuando_faltan_los_ceros(window):
+    """Escribir 40 queriendo 40 millones no debe pasar en silencio."""
+    panel = window.scenario_panel
+
+    panel.initial_value.setValue(40)
+    texto = panel.initial_hint.text()
+    assert "unidades" in texto
+    assert "40,000,000" in texto
+
+    panel.initial_value.setValue(40_000_000)
+    assert "unidades" not in panel.initial_hint.text()
+    assert "40.0MM" in panel.initial_hint.text()
+
+    panel.initial_value.setValue(0)
+    assert "Sin capital inicial" in panel.initial_hint.text()
+
+
+def test_cancelar_empezar_de_cero_no_borra_nada(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
+    )
+    antes = [s.name for s in window.scenario.strategies]
+    window.scenario_panel.reset_button.click()
+    assert [s.name for s in window.scenario.strategies] == antes
+
+
+def test_la_sesion_se_guarda_sin_cerrar_la_app(window):
+    """Un cierre inesperado no debe llevarse lo cargado."""
+    from gbp.io import library
+
+    window.scenario.name = "Editado sin cerrar"
+    window._save_session_now()  # lo que hace el temporizador al dispararse
+
+    restaurado, _ = library.load_session()
+    assert restaurado is not None
+    assert restaurado.name == "Editado sin cerrar"
+
+
+def test_borrar_todas_las_estrategias_conserva_el_escenario(window, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
+    )
+    panel = window.strategies_panel
+    capital, horizonte = window.scenario.initial_value, window.scenario.horizon
+
+    panel._remove_all_strategies()
+
+    assert window.scenario.strategies == []
+    assert panel.selector.count() == 0
+    assert panel.current is None
+    assert window.scenario.initial_value == capital
+    assert window.scenario.horizon == horizonte
+    # Los paneles hijos quedan deshabilitados, no rotos.
+    assert not panel.cashflow_panel.isEnabled()
+    assert not panel.leverage_panel.isEnabled()

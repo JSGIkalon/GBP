@@ -272,3 +272,147 @@ granular e informe PDF.
   otro camino de la app, así que si PyInstaller no lo recogiera el fallo
   aparecería solo en el .exe y solo al pulsar «Exportar PDF».
 
+## Sesión 7 — 19 sep 2026
+
+Un bug de fondo en el margin call, sesión persistente y lectura por clase de activo.
+
+**Hecho**
+
+- **Corregido: la llamada a margen creaba patrimonio de la nada.** El motor
+  bajaba la deuda pero no los activos vendidos.
+- **La sesión anterior se restaura al abrir.** Se acabó volver a ver el caso de
+  ejemplo después de haber cargado uno real.
+- **Botón «Borrar todas»** en Estrategias: vacía la comparación conservando
+  capital, horizonte e inflación.
+- **Vista por clase de activo** en Pesos y en el informe: renta variable, renta
+  fija, alternativos y caja, derivada de los pesos por sub-clase.
+- **123 tests**, todos en verde. `dist\GBP.exe` regenerado y verificado congelado.
+
+**Decisiones y hallazgos**
+
+- **El margin call estaba mal y ningún test lo veía.** `LoanSimulator.margin_call`
+  devuelve el monto liquidado y ya lo resta del saldo de la deuda; el motor
+  descartaba ese valor, así que los activos nunca bajaban. Consecuencias: el
+  patrimonio neto **subía** al recibir una llamada a margen —vender para pagar
+  deuda es neutro, no un ingreso— y los años siguientes capitalizaban sobre un
+  portafolio que ya se había vendido. En una traza determinista con el
+  portafolio cayendo 25% al año, el patrimonio neto pasaba de 5.7MM a 6.0MM
+  entre el año 1 y el 2.
+  Por qué no se detectó: los seis tests del margin call prueban
+  `LoanSimulator` **en aislamiento**, donde la matemática es correcta, y el
+  único test de integración solo comprobaba que hubiera liquidaciones
+  (`forced_sales.max() > 0`), nunca que los activos bajaran. Salió al construir
+  trazas deterministas para explicar el modelo, no corriendo la suite.
+  La prueba nueva no mira el monto: afirma que **el patrimonio neto nunca sube
+  en un escenario que solo pierde valor**, que es la propiedad que importa.
+- **La sesión se guarda aparte del caso.** Guardar el `.gbp.json` sigue siendo
+  explícito; `last_session.json` es una red, no un autoguardado que pise
+  archivos del usuario. Una sesión corrupta cae al caso de ejemplo sin ruido:
+  no poder abrir la app sería peor que perder la sesión.
+- **Dos cortes de clases de activo conviven a propósito.** El de cuatro grupos
+  (`model/groups.py`) responde "cómo se lee la asignación"; el de ocho
+  (`engine/stress.py`) responde "qué se mueve junto en una crisis". Unificarlos
+  obligaría a un corte que no sirve para ninguna de las dos.
+- **La agregación es vista, nunca input.** Los pesos siguen cargándose por
+  sub-clase, que es el único nivel al que existen retorno, volatilidad y
+  correlación. Dejar escribir "renta variable 45%" exigiría una regla de reparto
+  dentro del grupo, y esa regla sería un supuesto invisible más.
+
+## Sesión 8 — 19 sep 2026
+
+Salida de la restauración de sesión, autoguardado y un aviso de escala.
+
+**Hecho**
+
+- **Botón «Empezar de cero»** en el panel de Escenario: vacía capital,
+  horizonte, inflación y todas las estrategias, y olvida la sesión guardada.
+- **La sesión se guarda 1,5 s después del último cambio**, no solo al cerrar.
+- **Aviso de escala en el capital inicial**: eco del monto formateado, y
+  semáforo cuando el valor es menor que mil.
+- **127 tests** en verde. `dist\GBP.exe` regenerado y verificado congelado.
+
+**Decisiones y hallazgos**
+
+- **Restaurar la sesión sin una salida es una trampa.** El reporte era «siempre
+  que abro veo las mismas tres estrategias». La sesión funcionaba: el archivo
+  guardaba capital 40 y horizonte 25, que eran ediciones reales del usuario y
+  no los valores de fábrica. Lo que faltaba era poder vaciar el caso: el
+  ejemplo se carga la primera vez y desde entonces la restauración lo devuelve
+  fielmente, para siempre. Diagnosticarlo fue leer el JSON guardado, no releer
+  el código — la hipótesis inicial (que la persistencia no escribía) era falsa
+  y se descartó en dos comandos.
+- **Empezar de cero borra también la sesión guardada.** Si solo vaciara el caso
+  en memoria, un cierre inesperado antes del siguiente guardado resucitaría lo
+  que se acaba de borrar.
+- **Guardar solo al cerrar no alcanza** para "los cambios deben mantenerse": un
+  cierre inesperado se lleva todo. Guardar en cada señal `changed` tampoco, que
+  se emite por pulsación de tecla. El retardo de 1,5 s es el punto medio, y al
+  cerrar se cancela el pendiente y se escribe ya.
+- **El campo de capital está en unidades y eso no se veía.** En el caso real del
+  usuario decía `40`: cuarenta dólares con retiros de 1.1MM al año, así que la
+  proyección salía negativa desde el año 1 y el patrimonio mediano final daba
+  −38MM. No se impide —un capital pequeño es legítimo— pero ahora el campo
+  hace eco de la escala y avisa por debajo de mil.
+
+## Sesión 9 — 19 sep 2026
+
+Activos propios: la app deja de servir solo para patrimonios en EE.UU.
+
+**Hecho**
+
+- **Clases de activo propias** con retorno y volatilidad fijados a mano, para
+  patrimonio que el LTCMA no cubre (renta fija colombiana, finca raíz local).
+- El analista solo declara **la clase de activo**; la app deriva correlaciones,
+  shock de estrés y grupo de la vista agrupada.
+- Panel de Activos con columnas **Origen** y **Clase**, y diálogo de creación
+  con vista previa en vivo de lo que se va a derivar.
+- Los activos propios **viajan dentro del `.gbp.json`** y se fusionan al abrir.
+- Página nueva en el informe PDF con los supuestos declarados.
+- **167 tests**. `dist\GBP.exe` regenerado y verificado congelado.
+
+**Decisiones y hallazgos**
+
+- **El obstáculo no era el que parecía.** Retorno y volatilidad son campos
+  sueltos; el problema son las correlaciones, porque el motor necesita una fila
+  y una columna por activo y `montecarlo.py` reventaba con un `KeyError` para
+  cualquier nombre fuera de la matriz publicada.
+- **"El promedio de su clase" no es una aproximación tosca: es realizable.**
+  Con `z = λ·p + sqrt(1 − λ²·var(p))·ε`, la matriz extendida es la correlación
+  de un vector aleatorio explícito y por tanto PSD **por construcción**. No se
+  repara con `nearest_psd` a propósito: hacerlo destruiría las correlaciones
+  derivadas exactas para arreglar un problema inexistente.
+- **La clase Caja tiene un solo miembro y eso rompía el diseño.** `var(p) = 1`
+  para `U.S. Cash`, así que una caja colombiana salía como clon perfecto y la
+  matriz exactamente singular. `cholesky_factor` lo habría sobrevivido por su
+  empujón en la diagonal, pero apoyarse en esa red para un caso previsible es
+  malo. Se cierra con `CORRELATION_CAP = 0.95`, que solo actúa donde hace falta.
+  Salió midiendo `var(p)` de las cuatro clases antes de escribir una línea.
+- **El promedio del bloque debe incluir la diagonal.** Es el error silencioso
+  más probable de todo el cambio: excluir los términos `g == h` rompe la
+  garantía de PSD sin que nada falle ni se note. Tiene test propio.
+- **La app no convierte monedas, y es decisión, no pereza.** Meter un 10% en
+  pesos con 2% de volatilidad sin descontar devaluación baja la volatilidad del
+  portafolio al 6% y dispara la probabilidad de éxito al 100%: el informe sale
+  espectacular y está mal. El diálogo lo advierte con el ejemplo numérico.
+- **El caso manda sobre la librería en un conflicto de supuestos.** Un informe
+  entregado a un cliente tiene que poder reproducirse tal cual; si la librería
+  local se impusiera en silencio, el mismo archivo daría dos proyecciones en dos
+  computadores — exactamente la falla que motivó bloquear el panel de Activos.
+- **El resolvedor de clases va como campo de `StressScenario`, no como
+  parámetro.** Así `impact()`, `breakdown()`, `run_stress_tests()` y el gráfico
+  de estrés no cambian de firma: el resolvedor se pone una vez con
+  `with_resolver()` y el resto del código no se entera.
+- **`from_dict` no pasó a devolver una tupla.** Habría roto a todos sus
+  llamadores, entre ellos la restauración de sesión. Los activos propios se leen
+  con una función hermana, `custom_assets_from_dict`.
+- **`reset_cmas_to_ltcma()` ya no borra los activos propios.** No vienen del
+  LTCMA, así que reimportarlo no puede ser motivo para perderlos — y hacerlo
+  dejaría casos guardados imposibles de abrir.
+- **Una captura destapó un hueco que los tests no veían**: el panel de Activos
+  no se refrescaba cuando la librería cambiaba por fuera, que es justo lo que
+  pasa al abrir un caso con activos propios nuevos.
+- Límite conocido: el promedio de "Alternativos" mezcla oro, private equity,
+  hedge funds e inmobiliario. Es defendible, y si hiciera falta precisión el
+  camino es dejar elegir un activo de referencia concreto — la regla está
+  aislada en `extend_correlations`, así que no obliga a rehacer nada.
+

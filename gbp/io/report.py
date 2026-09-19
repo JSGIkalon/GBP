@@ -28,6 +28,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
 
 from ..engine.stress import StressScenario
+from ..model.groups import group_summary
 from ..model.results import SimulationResult
 from ..model.scenario import Scenario, SimulationSettings
 from ..ui.charts.box_chart import distribution_table_rows, draw_box_chart
@@ -70,6 +71,10 @@ class ReportOptions:
     include_debt: bool = True
     include_inputs: bool = True
     include_disclaimer: bool = True
+    # Resolvedor de clases y librería: hacen falta para que los activos propios
+    # salgan agrupados en su clase declarada y documentados como tales.
+    resolver: object | None = None
+    cmas: object | None = None
 
     @property
     def date_text(self) -> str:
@@ -341,10 +346,19 @@ def _inputs_pages(pdf: PdfPages, options: ReportOptions, page_no: int,
                     fontweight="semibold")
         y -= 0.032
 
+        # Primero la lectura agrupada, que es la que se mira en una reunión, y
+        # debajo el detalle por sub-clase, que es el que hace falta para
+        # reproducir el caso.
+        resumen = group_summary(strategy.weights, options.resolver)
+        for line in _wrap(f"Por clase de activo: {resumen}", 130):
+            figure.text(MARGIN + 0.01, y, line, color=INK, fontsize=8.5,
+                        fontweight="semibold")
+            y -= 0.024
+
         pesos = " · ".join(
             f"{name} {weight:.1%}" for name, weight in strategy.weights.items()
         ) or "sin pesos definidos"
-        for line in _wrap(f"Pesos: {pesos}", 130):
+        for line in _wrap(f"Detalle por sub-clase: {pesos}", 130):
             figure.text(MARGIN + 0.01, y, line, color=INK, fontsize=8.5)
             y -= 0.024
 
@@ -392,6 +406,70 @@ def _inputs_pages(pdf: PdfPages, options: ReportOptions, page_no: int,
         else:
             figure.text(MARGIN + 0.01, y, "Sin apalancamiento.", color=INK_SOFT, fontsize=8.5)
             y -= 0.024
+
+    pdf.savefig(figure)
+    page_no += 1
+
+    propios = _custom_used(scenario, options)
+    if propios:
+        page_no = _custom_assets_page(pdf, options, page_no, propios)
+    return page_no
+
+
+def _custom_used(scenario: Scenario, options: ReportOptions) -> list:
+    """Activos propios que el caso usa, para documentarlos en el informe."""
+    if options.cmas is None:
+        return []
+    usados = []
+    for name in scenario.asset_names:
+        try:
+            asset = options.cmas.by_name(name)
+        except KeyError:
+            continue
+        if asset.is_custom:
+            usados.append(asset)
+    return usados
+
+
+def _custom_assets_page(pdf: PdfPages, options: ReportOptions, page_no: int,
+                        propios: list) -> int:
+    """Página de activos propios.
+
+    No es opcional cuando los hay: un supuesto que fijó el analista y que no
+    está publicado por nadie tiene que quedar escrito en el documento que ve el
+    cliente, o la proyección no se puede auditar.
+    """
+    figure = _new_page(pdf, options, "Activos propios", page_no)
+    figure.text(MARGIN, 0.90, "Supuestos declarados por el analista",
+                color=INK, fontsize=14, fontweight="semibold", va="top")
+
+    y = 0.83
+    for line in _wrap(
+        "Estas clases de activo no están en el LTCMA: sus supuestos los fijó quien "
+        "preparó este informe, y sus correlaciones se derivan del promedio de la "
+        "clase de activo indicada. Los valores están en dólares.", 130
+    ):
+        figure.text(MARGIN, y, line, color=INK_SOFT, fontsize=8.5)
+        y -= 0.024
+
+    y -= 0.02
+    for asset in propios:
+        _swatch(figure, MARGIN, y, NAVY)
+        figure.text(MARGIN + 0.018, y, asset.name.upper(), color=NAVY, fontsize=9,
+                    fontweight="semibold")
+        y -= 0.032
+        detalle = (
+            f"Clase: {asset.asset_class} · retorno compuesto {asset.compound_return:.2%}"
+            f" · volatilidad {asset.volatility:.2%} · yield {asset.yield_:.2%}"
+        )
+        for line in _wrap(detalle, 130):
+            figure.text(MARGIN + 0.01, y, line, color=INK, fontsize=8.5)
+            y -= 0.024
+        if asset.notes:
+            for line in _wrap(f"Notas: {asset.notes}", 130):
+                figure.text(MARGIN + 0.01, y, line, color=INK_SOFT, fontsize=8.5)
+                y -= 0.024
+        y -= 0.014
 
     pdf.savefig(figure)
     return page_no + 1

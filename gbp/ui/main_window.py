@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QDialog,
@@ -23,10 +23,19 @@ from PySide6.QtWidgets import (
 
 from ..engine.stress import default_scenarios
 from ..io import library
-from ..io.caseio import EXTENSION, CaseFormatError, load_case, save_case
+from ..io.caseio import (
+    EXTENSION,
+    CaseFormatError,
+    custom_assets_from_dict,
+    from_dict,
+    read_case,
+    save_case,
+)
 from ..io.report import build_report
 from ..model.correlation import CorrelationMatrix
+from ..model.custom_assets import custom_pairs, extend_correlations, resolver_for
 from .brand import app_icon, symbol_pixmap, wordmark_pixmap
+from .custom_asset_dialog import merge_custom_assets
 from .export_dialog import ExportDialog
 from .panels.assets_panel import AssetsPanel
 from .panels.correlation_panel import CorrelationPanel
@@ -54,16 +63,34 @@ class MainWindow(QMainWindow):
 
         self.cmas = library.load_cmas()
         self.settings = library.load_settings()
-        self.correlations = CorrelationMatrix.load()
+        # `base_correlations` son las 59 publicadas y no cambian nunca;
+        # `correlations` es la extendida con los activos propios, y es la que ve
+        # todo el resto de la app —incluido el motor, que por eso no se entera.
+        self.base_correlations = CorrelationMatrix.load()
+        self.correlations = self.base_correlations
+        self.resolver = None
         self.stress_scenarios = default_scenarios()
-        self.scenario = build_sample_case()
-        self.current_path: Path | None = None
+        self._rebuild_market_model()
+        # Se restaura el caso de la sesión anterior. El caso de ejemplo solo
+        # aparece la primera vez: volver a ver los mismos supuestos de fábrica
+        # después de haber cargado un caso real es perder trabajo.
+        restored, restored_path = library.load_session()
+        self.scenario = restored if restored is not None else build_sample_case()
+        self._restored_session = restored is not None
+        self.current_path: Path | None = restored_path
         self._thread = None
         self._worker = None
+
+        self._session_timer = QTimer(self)
+        self._session_timer.setSingleShot(True)
+        self._session_timer.timeout.connect(self._save_session_now)
 
         self._build_ui()
         self._build_menu()
         self._refresh_dependent_views()
+        if self._restored_session:
+            nombre = self.current_path.name if self.current_path else self.scenario.name
+            self.status.setText(f"Se restauró la sesión anterior: {nombre}")
 
     # ------------------------------------------------------------------
     @property
@@ -87,10 +114,10 @@ class MainWindow(QMainWindow):
         self.inputs = QTabWidget()
         self.scenario_panel = ScenarioPanel(self.scenario)
         self.strategies_panel = StrategiesPanel(
-            self.scenario, self.cmas, self.available_assets
+            self.scenario, self.cmas, self.available_assets, self.resolver
         )
-        self.assets_panel = AssetsPanel(self.cmas)
-        self.correlation_panel = CorrelationPanel(self.correlations)
+        self.assets_panel = AssetsPanel(self.cmas, self.base_correlations)
+        self.correlation_panel = CorrelationPanel(self.correlations, self.resolver)
         self.settings_panel = SettingsPanel(self.settings)
 
         # Etiquetas cortas: con los nombres largos las cinco pestañas no caben
@@ -104,6 +131,7 @@ class MainWindow(QMainWindow):
         self.inputs.setTabToolTip(4, "Configuración general de la aplicación")
 
         self.scenario_panel.changed.connect(self._on_scenario_changed)
+        self.scenario_panel.reset_requested.connect(self.reset_case)
         self.strategies_panel.changed.connect(self._on_scenario_changed)
         self.assets_panel.changed.connect(self._on_assets_changed)
         self.settings_panel.changed.connect(self._on_settings_changed)
@@ -261,9 +289,45 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def _on_scenario_changed(self):
         self._refresh_dependent_views()
+        self._schedule_session_save()
+
+    def _schedule_session_save(self):
+        """Guarda la sesión poco después del último cambio.
+
+        No basta con guardar al cerrar: un cierre inesperado —o matar el proceso—
+        se lleva todo lo cargado. Se hace con retardo porque `changed` se emite
+        en cada tecla de cada campo, y escribir el JSON en cada pulsación sería
+        una escritura a disco por letra.
+        """
+        self._session_timer.start(1500)
+
+    def _save_session_now(self):
+        try:
+            library.save_session(self.scenario, self.current_path)
+        except OSError:
+            pass  # que no se pueda guardar la red no debe romper la app
+
+    def _rebuild_market_model(self):
+        """Recalcula lo que depende de los activos propios de la librería.
+
+        Un único sitio para que la matriz extendida, el resolvedor de clases y
+        los escenarios de estrés no puedan quedar desacompasados entre sí. Es
+        barato —un producto de 59×k— así que se llama sin miramientos.
+        """
+        self.correlations = extend_correlations(
+            self.base_correlations, custom_pairs(self.cmas)
+        )
+        self.resolver = resolver_for(self.cmas, self.base_correlations)
+        self.stress_scenarios = [
+            s.with_resolver(self.resolver) for s in default_scenarios()
+        ]
 
     def _on_assets_changed(self):
-        self.strategies_panel.reload(self.scenario, self.cmas, self.available_assets)
+        self._rebuild_market_model()
+        self.strategies_panel.reload(
+            self.scenario, self.cmas, self.available_assets, self.resolver
+        )
+        self.correlation_panel.set_correlations(self.correlations, self.resolver)
         self._refresh_dependent_views()
 
     def _on_settings_changed(self):
@@ -282,17 +346,52 @@ class MainWindow(QMainWindow):
 
     def _reload_all(self):
         self.scenario_panel.reload(self.scenario)
-        self.strategies_panel.reload(self.scenario, self.cmas, self.available_assets)
+        # La librería puede haber cambiado por fuera del panel: abrir un caso
+        # fusiona sus activos propios. Sin esto, la tabla se queda mostrando la
+        # librería de antes.
+        self.assets_panel.reload(self.cmas)
+        self.correlation_panel.set_correlations(self.correlations, self.resolver)
+        self.strategies_panel.reload(
+            self.scenario, self.cmas, self.available_assets, self.resolver
+        )
         self.results.clear()
         self.export_action.setEnabled(False)  # el informe siempre describe una corrida
         self._refresh_dependent_views()
+        self._schedule_session_save()
 
     # ------------------------------------------------------------------
     def new_case(self):
         self.scenario = empty_case()
         self.current_path = None
+        # Se olvida la sesión guardada además de vaciar el caso: si no, un cierre
+        # inesperado antes del siguiente guardado resucitaría lo que se acaba de
+        # borrar.
+        library.clear_session()
         self._reload_all()
         self.status.setText("Caso nuevo. Los supuestos de la librería se conservan.")
+
+    def reset_case(self):
+        """«Empezar de cero» desde el panel de Escenario, con confirmación.
+
+        Es destructivo y no se puede deshacer, así que pregunta aunque ya haya
+        un «Nuevo caso» en el menú que no lo hace: el botón está a un clic y a
+        la vista, el menú no.
+        """
+        if QMessageBox.question(
+            self,
+            "Empezar de cero",
+            "¿Vaciar el caso por completo?\n\n"
+            "Se borran el capital, el horizonte, la inflación y todas las "
+            "estrategias con sus pesos, flujos y créditos, y se olvida la sesión "
+            "guardada.\n\n"
+            "Los supuestos de mercado y la configuración de la app no se tocan. "
+            "Esto no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        self.new_case()
+        self.status.setText("Caso vacío. Empieza cargando el escenario y una estrategia.")
 
     def load_sample(self):
         self.scenario = build_sample_case()
@@ -305,13 +404,27 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            self.scenario = load_case(path)
+            payload = read_case(path)
+            scenario = from_dict(payload)
+            propios = custom_assets_from_dict(payload)
         except (CaseFormatError, OSError) as exc:
             QMessageBox.critical(self, "No se pudo abrir el caso", str(exc))
             return
+
+        # La fusión va **antes** de adoptar el caso: si el usuario cancelara a
+        # mitad, es preferible quedarse con el caso anterior intacto que con uno
+        # cargado a medias y sin sus supuestos.
+        avisos = merge_custom_assets(self, self.cmas, propios)
+
+        self.scenario = scenario
         self.current_path = Path(path)
+        self._rebuild_market_model()
         self._reload_all()
-        self.status.setText(f"Caso abierto: {self.current_path.name}")
+
+        mensaje = f"Caso abierto: {self.current_path.name}"
+        if avisos:
+            mensaje += " · " + " · ".join(avisos)
+        self.status.setText(mensaje)
 
     def save_case_as_current(self):
         if self.current_path is None:
@@ -330,7 +443,9 @@ class MainWindow(QMainWindow):
 
     def _write_case(self, path: Path):
         try:
-            save_case(self.scenario, path)
+            # Con la librería, para que los activos propios que el caso usa
+            # viajen dentro y se pueda abrir en otro computador.
+            save_case(self.scenario, path, self.cmas)
         except OSError as exc:
             QMessageBox.critical(self, "No se pudo guardar", str(exc))
             return
@@ -411,6 +526,8 @@ class MainWindow(QMainWindow):
             return
 
         options = dialog.options()
+        options.resolver = self.resolver
+        options.cmas = self.cmas
         suggested = f"{options.title} — {self.scenario.name}.pdf".replace("/", "-")
         path, _ = QFileDialog.getSaveFileName(
             self, "Guardar informe", suggested, "Documentos PDF (*.pdf)"
@@ -458,4 +575,11 @@ class MainWindow(QMainWindow):
             self._thread.wait(3000)
         library.save_cmas(self.cmas)
         library.save_settings(self.settings)
+        # El caso en curso se guarda siempre, se haya guardado a archivo o no.
+        # No reemplaza a «Guardar caso»: es la red para no perder lo cargado si
+        # la app se cierra antes. Se cancela el guardado con retardo pendiente y
+        # se escribe ya, para no depender de un temporizador que quizá no llegue
+        # a dispararse.
+        self._session_timer.stop()
+        self._save_session_now()
         super().closeEvent(event)

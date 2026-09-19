@@ -21,8 +21,11 @@ Investments Corp., jun 2026), que se usa como caso de control del motor.
 
 | 5 | Estrategias independientes, distribución con percentiles, marca y repaso visual | **Completa** |
 | 6 | Supuestos de mercado bloqueados, arreglos de edición, progreso granular, informe PDF | **Completa** |
+| 7 | Margin call corregido, sesión persistente, vista por clase de activo | **Completa** |
+| 8 | «Empezar de cero», autoguardado de sesión, aviso de escala del capital | **Completa** |
+| 9 | Activos propios: patrimonio fuera del universo del LTCMA | **Completa** |
 
-**La aplicación está terminada y funcionando.** 97 tests en verde y `dist\GBP.exe`
+**La aplicación está terminada y funcionando.** 167 tests en verde y `dist\GBP.exe`
 (81.3 MB) verificado con `tools/packaging_check.py` congelado: recursos
 embebidos, persistencia en `%APPDATA%`, motor, interfaz e informe PDF.
 
@@ -84,18 +87,19 @@ run.py           punto de entrada
 gbp/
   data/          correlations.json, ltcma_usd.json, brand/  (recursos embebidos)
   model/         assets, correlation, allocation, strategy, cashflows, leverage,
-                 scenario, results
+                 scenario, results, groups (agregación en clases de activo),
+                 custom_assets (activos propios fuera del LTCMA)
   engine/        montecarlo, summary, stress
   io/            library (CMAs + config global), caseio (casos de cliente),
                  report (informe PDF)
   ui/            main_window, worker (hilo), theme, brand, sample_case,
-                 export_dialog
+                 export_dialog, custom_asset_dialog
     panels/      scenario, strategies (con cashflow, leverage, capital dentro),
                  assets, correlation, settings, results
     charts/      canvas (con hover), box_chart, stress_chart, debt_chart
 tools/           import_ltcma, extract_brand, smoke_pdf_case, packaging_check,
                  screenshot, build_exe.ps1
-tests/           97 tests
+tests/           167 tests
 ```
 
 ### El modelo de estrategia
@@ -153,6 +157,100 @@ Otras reglas de los gráficos:
 - El tope de estrategias comparables es el número de pasos de la rampa (4). Más
   allá no se inventan tonos: la interfaz lo impide.
 
+### Activos propios: patrimonio fuera del LTCMA
+
+El LTCMA cubre 59 clases en USD. Un cliente colombiano tiene TES, CDT y finca
+raíz en Bogotá, y nada de eso está ahí. Un **activo propio** es una clase que
+declara el analista, con su retorno y su volatilidad.
+
+Lo difícil no son esos dos números: son las **correlaciones**, porque el motor
+sortea retornos correlacionados con Cholesky sobre la matriz completa y todo
+activo necesita su fila. El principio que lo resuelve:
+
+> Un activo propio se comporta como **el promedio de su clase de activo**, más
+> su propio riesgo idiosincrático.
+
+De ese único enunciado salen las tres cosas que nadie escribe: correlaciones
+(`model/custom_assets.py`), shock de estrés (`engine/stress.py`) y grupo en la
+vista agrupada (`model/groups.py`). El analista solo elige la clase.
+
+**Por qué la matriz extendida es válida.** Siendo `p` el portafolio
+equiponderado de la clase en retornos estandarizados, el activo se construye
+como `z = λ·p + sqrt(1 − λ²·var(p))·ε` con `ε` independiente. Es un vector
+aleatorio explícito, así que la matriz extendida es PSD **por construcción**.
+No se pasa por `nearest_psd` a propósito: repararla destruiría las
+correlaciones derivadas exactas para arreglar un problema que no existe.
+
+**El caso degenerado que costó encontrar.** `var(p) ≤ 1` siempre, con igualdad
+solo cuando la clase tiene un único miembro — y **la clase Caja tiene uno solo**
+(`U.S. Cash`). Con λ = 1, una "caja colombiana" salía con correlación 1.00: un
+clon sin riesgo propio y una matriz exactamente singular. De ahí
+`CORRELATION_CAP = 0.95`, que limita cuánto puede explicar la clase. Para las
+tres clases pobladas λ = 1 y no cambia nada. Medido sobre la matriz real:
+
+| Clase | Miembros | var(p) | Riesgo propio |
+|---|---|---|---|
+| Renta variable | 17 | 0.77 | 23% |
+| Renta fija | 21 | 0.57 | 43% |
+| Alternativos | 19 | 0.40 | 60% |
+| Caja | 1 | 1.00 | — necesita el tope |
+
+**Trampa de implementación.** El promedio del bloque de la clase tiene que
+incluir los términos `g == h`, que valen 1: solo así vale `var(p)` y la
+construcción es realizable. Excluir la diagonal rompe la garantía de PSD en
+silencio, sin que nada falle. Lo protege
+`test_el_promedio_de_clase_incluye_los_terminos_diagonales`.
+
+**Moneda.** Los tres números van en USD y la app **no convierte**. Es decisión
+explícita: un 10% en pesos sin descontar devaluación baja la volatilidad del
+portafolio y dispara la probabilidad de éxito, y el informe saldría
+espectacular y mal. El diálogo lo advierte con el ejemplo numérico.
+
+**Dónde viven.** En `cma_library.json` para reusarlos entre clientes **y**
+copiados dentro del `.gbp.json`, porque los declara cada analista y sin eso un
+caso no abriría en otro computador. Al abrir, `merge_custom_assets` garantiza la
+invariante que importa: todo activo propio del caso acaba en la librería en
+memoria, así que la matriz extendida siempre lo cubre.
+
+**Conflicto de supuestos al abrir un caso.** Si el mismo activo está en la
+librería con otros números, **manda el caso** por defecto: un informe entregado
+a un cliente tiene que poder reproducirse tal cual. Se puede adoptar en la
+librería o quedarse con la local, pero nunca en silencio.
+
+### Dos cortes de clases de activo, y por qué no son el mismo
+
+`gbp/model/groups.py` agrega las 59 sub-clases en **cuatro**: renta variable,
+renta fija, alternativos y caja. Es la lectura de comité, y es **solo vista**:
+los pesos se cargan siempre por sub-clase, que es el nivel al que existen
+retorno, volatilidad y correlación.
+
+`gbp/engine/stress.py` agrupa en **ocho** bloques distintos. No es duplicación:
+aquel corte responde "qué se mueve junto en una crisis" y este "cómo se lee la
+asignación". Un solo corte que sirviera para las dos preguntas no serviría para
+ninguna — el stress necesita separar gobierno de crédito, y el comité no.
+
+Dos fronteras del corte de cuatro son convención, no verdad, y están declaradas
+en el módulo: **Direct Lending y Commercial Mortgage Loans van a alternativos**
+(crédito privado e ilíquido) y **los REITs también** (se agrupan con el ladrillo
+porque la pregunta es a qué está expuesto el patrimonio, no dónde cotiza).
+
+### La sesión anterior
+
+El caso en curso se guarda en `%APPDATA%/Ikalon/GBP/last_session.json` —con la
+ruta del `.gbp.json` si venía de uno— y se restaura al abrir. Se escribe **1,5 s
+después del último cambio** y también al cerrar: guardar solo al cerrar deja que
+un cierre inesperado se lleve todo, y guardar en cada pulsación sería una
+escritura a disco por letra. **No reemplaza a Guardar caso**: es una red, no un
+autoguardado que pise archivos del usuario. Una sesión ilegible nunca impide
+abrir: se cae al caso de ejemplo.
+
+**Restaurar la sesión necesita una salida.** El caso de ejemplo se carga la
+primera vez y desde entonces la sesión lo restaura fielmente, así que sin un
+botón que vacíe el caso las tres estrategias de ejemplo vuelven para siempre.
+Eso es «Empezar de cero» en el panel de Escenario, que además borra la sesión
+guardada: si solo vaciara el caso, un cierre inesperado antes del siguiente
+guardado resucitaría lo recién borrado.
+
 ### El informe PDF
 
 `gbp/io/report.py` arma el PDF **con matplotlib**, no con una librería de
@@ -196,8 +294,10 @@ otra tabla necesita color de celda, hay que usar el mismo delegado.
 | Dato | Ubicación | Editable en la UI |
 |---|---|---|
 | Correlaciones | `gbp/data/correlations.json` (embebido) | No, solo lectura |
-| Retorno / volatilidad / yield | `%APPDATA%/Ikalon/GBP/cma_library.json` | No, solo lectura |
+| Retorno / volatilidad / yield del LTCMA | `%APPDATA%/Ikalon/GBP/cma_library.json` | No, solo lectura |
+| Activos propios | misma librería, más copia en el `.gbp.json` | Sí, se crean y editan |
 | Nº de simulaciones, semilla, años hito | `%APPDATA%/Ikalon/GBP/settings.json` | Sí, en Ajustes |
+| Caso de la sesión anterior | `%APPDATA%/Ikalon/GBP/last_session.json` | Se guarda al cerrar |
 | Portada del informe (autor, cliente) | `%APPDATA%/Ikalon/GBP/report_defaults.json` | Sí, al exportar |
 | Caso del cliente (escenario + estrategias) | `.gbp.json` elegido por el usuario | Sí |
 | Logos Ikalon | `gbp/data/brand/` (embebido) | No |
@@ -237,6 +337,9 @@ retiros indexados a inflación → control de LTV y liquidación forzada.
   íntegro en el último año.
 - **Margin call**: vender activos para pagar deuda baja ambos lados por igual, así que
   el monto que devuelve el LTV al objetivo `t` sale de `d = (D - t·A) / (1 - t)`.
+  **Los dos lados**: el motor resta `d` del saldo y también de los activos. Durante
+  seis sesiones solo restó la deuda, y el patrimonio neto subía al recibir una
+  llamada a margen. Lo protege `test_la_llamada_a_margen_no_crea_patrimonio`.
 - **Probabilidad de éxito** = fracción de caminos en que el patrimonio neto nunca
   llega a cero o menos.
 

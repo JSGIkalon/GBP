@@ -14,6 +14,16 @@ rechazarse:
   exactamente la semántica que tenían.
 * **Esquema 2** — cada estrategia lleva los suyos, más un capital inicial propio
   opcional.
+* **Esquema 3** — el caso lleva además los **activos propios** que usa.
+
+Por qué los activos propios sí van en el caso
+---------------------------------------------
+Los supuestos del LTCMA no viajan porque son idénticos en todas las máquinas:
+son un recurso embebido y versionado. Los activos propios no tienen esa
+garantía —los declara cada analista— así que un caso que los usara sin
+llevarlos consigo no se podría abrir en otro computador. Se guardan **solo los
+que el caso usa**: copiar la librería entera sería justo el error que este
+módulo evita a propósito.
 """
 
 from __future__ import annotations
@@ -28,7 +38,7 @@ from ..model.leverage import Amortization, InterestMode, LoanTerms, RateMode
 from ..model.scenario import Scenario
 from ..model.strategy import Strategy
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 EXTENSION = ".gbp.json"
 
 
@@ -92,25 +102,71 @@ def _flow_from_dict(payload: dict) -> CashFlow:
     )
 
 
-def to_dict(scenario: Scenario) -> dict:
-    return {
+def to_dict(scenario: Scenario, cmas=None) -> dict:
+    """Forma serializada del caso.
+
+    Si se pasa la librería, se embeben los activos propios que el caso usa, para
+    que se pueda abrir en otro computador.
+    """
+    payload: dict = {
         "schema": SCHEMA_VERSION,
-        "scenario": {
-            "name": scenario.name,
-            "initial_value": scenario.initial_value,
-            "horizon": scenario.horizon,
-            "inflation": scenario.inflation,
-            "strategies": [
-                {
-                    "name": s.name,
-                    "weights": dict(s.weights),
-                    "cashflows": [_flow_to_dict(f) for f in s.cashflows],
-                    "loan": _loan_to_dict(s.loan) if s.loan else None,
-                    "initial_value": s.initial_value,
-                }
-                for s in scenario.strategies
-            ],
-        },
+    }
+    if cmas is not None:
+        propios = _used_custom_assets(scenario, cmas)
+        if propios:
+            payload["custom_assets"] = propios
+    payload["scenario"] = _scenario_to_dict(scenario)
+    return payload
+
+
+def _used_custom_assets(scenario: Scenario, cmas) -> list[dict]:
+    """Activos propios que alguna estrategia usa, con sus supuestos."""
+    from .library import asset_to_dict
+
+    usados = []
+    for name in scenario.asset_names:
+        try:
+            asset = cmas.by_name(name)
+        except KeyError:
+            continue
+        if asset.is_custom:
+            # Sin `origin`: aquí todos son propios por definición.
+            usados.append(asset_to_dict(asset, with_origin=False))
+    return usados
+
+
+def custom_assets_from_dict(payload: dict) -> list:
+    """Activos propios embebidos en un caso.
+
+    Función hermana de `from_dict` en vez de un segundo valor de retorno: hacer
+    que `from_dict` devolviera una tupla rompería a todos sus llamadores, entre
+    ellos la restauración de sesión.
+    """
+    from ..model.assets import ORIGIN_CUSTOM
+    from .library import asset_from_dict
+
+    return [
+        asset_from_dict({**entry, "origin": ORIGIN_CUSTOM})
+        for entry in payload.get("custom_assets", [])
+    ]
+
+
+def _scenario_to_dict(scenario: Scenario) -> dict:
+    return {
+        "name": scenario.name,
+        "initial_value": scenario.initial_value,
+        "horizon": scenario.horizon,
+        "inflation": scenario.inflation,
+        "strategies": [
+            {
+                "name": s.name,
+                "weights": dict(s.weights),
+                "cashflows": [_flow_to_dict(f) for f in s.cashflows],
+                "loan": _loan_to_dict(s.loan) if s.loan else None,
+                "initial_value": s.initial_value,
+            }
+            for s in scenario.strategies
+        ],
     }
 
 
@@ -178,20 +234,25 @@ def _strategies_from_schema_1(data: dict) -> list[Strategy]:
     ]
 
 
-def save_case(scenario: Scenario, path: str | Path) -> Path:
+def save_case(scenario: Scenario, path: str | Path, cmas=None) -> Path:
     path = Path(path)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(
-        json.dumps(to_dict(scenario), indent=2, ensure_ascii=False), encoding="utf-8"
+        json.dumps(to_dict(scenario, cmas), indent=2, ensure_ascii=False),
+        encoding="utf-8",
     )
     tmp.replace(path)
     return path
 
 
-def load_case(path: str | Path) -> Scenario:
+def read_case(path: str | Path) -> dict:
+    """El JSON crudo del caso, para quien necesite también los activos propios."""
     path = Path(path)
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise CaseFormatError(f"El archivo no es un JSON válido: {exc}") from exc
-    return from_dict(payload)
+
+
+def load_case(path: str | Path) -> Scenario:
+    return from_dict(read_case(path))

@@ -76,9 +76,10 @@ class HeatmapDelegate(QStyledItemDelegate):
 class CorrelationPanel(QWidget):
     """Matriz de correlación embebida, solo lectura."""
 
-    def __init__(self, correlations: CorrelationMatrix, parent=None):
+    def __init__(self, correlations: CorrelationMatrix, resolver=None, parent=None):
         super().__init__(parent)
         self.correlations = correlations
+        self.resolver = resolver
         self._used_names: list[str] = []
 
         layout = QVBoxLayout(self)
@@ -121,6 +122,22 @@ class CorrelationPanel(QWidget):
         self.table.setItemDelegate(HeatmapDelegate(self.table))
         layout.addWidget(self.table, 1)
 
+        self.derived_note = QLabel("")
+        self.derived_note.setWordWrap(True)
+        self.derived_note.setStyleSheet("color: #5C6770;")
+        self.derived_note.setVisible(False)
+        layout.addWidget(self.derived_note)
+
+        self._render()
+
+    def set_correlations(self, correlations: CorrelationMatrix, resolver=None):
+        """Cambia la matriz mostrada: la extendida, cuando hay activos propios.
+
+        Ocultar las filas derivadas sería peor que mostrarlas: el analista tiene
+        derecho a ver con qué está simulando en realidad.
+        """
+        self.correlations = correlations
+        self.resolver = resolver
         self._render()
 
     def set_used_assets(self, names: list[str]):
@@ -160,7 +177,33 @@ class CorrelationPanel(QWidget):
                     item.setForeground(QBrush(QColor("#FFFFFF")))
                 else:
                     item.setForeground(QBrush(QColor("#1F2A30")))
-                item.setToolTip(f"{names[i]}\n{names[j]}\nCorrelación {value:.2f}")
+                propio = self.resolver is not None and (
+                    self.resolver.is_custom(names[i])
+                    or self.resolver.is_custom(names[j])
+                )
+                origen = (
+                    "\nDerivada del promedio de su clase, no publicada."
+                    if propio else ""
+                )
+                item.setToolTip(
+                    f"{names[i]}\n{names[j]}\nCorrelación {value:.2f}{origen}"
+                )
                 self.table.setItem(i, j, item)
 
         self.table.resizeColumnsToContents()
+        self._update_derived_note(names)
+
+    def _update_derived_note(self, names: list[str]):
+        propios = [
+            n for n in names
+            if self.resolver is not None and self.resolver.is_custom(n)
+        ]
+        if propios:
+            self.derived_note.setText(
+                f"{len(propios)} fila(s) son de activos propios: "
+                f"{', '.join(propios)}. Sus correlaciones no están publicadas — se "
+                "derivan del promedio de la clase de activo que declaraste."
+            )
+            self.derived_note.setVisible(True)
+        else:
+            self.derived_note.setVisible(False)

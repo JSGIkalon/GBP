@@ -48,16 +48,53 @@ def group_of(asset_name: str) -> str:
 
 @dataclass
 class StressScenario:
-    """Un escenario de estrés: shocks en forma decimal (-0.30 = caída de 30%)."""
+    """Un escenario de estrés: shocks en forma decimal (-0.30 = caída de 30%).
+
+    El `resolver` es opcional y solo hace falta cuando hay activos propios. Va
+    como **campo y no como parámetro** de `impact()` a propósito: así ni
+    `impact`, ni `breakdown`, ni `run_stress_tests`, ni el gráfico de estrés
+    cambian de firma. Quien construye los escenarios los resuelve una vez con
+    `with_resolver()` y el resto del código no se entera.
+    """
 
     name: str
     description: str = ""
     shocks: dict[str, float] = field(default_factory=dict)
     default_by_group: dict[str, float] = field(default_factory=dict)
+    resolver: object | None = None
+
+    def with_resolver(self, resolver) -> "StressScenario":
+        """Copia con el resolvedor puesto; los precargados nacen sin él."""
+        return StressScenario(
+            name=self.name,
+            description=self.description,
+            shocks=dict(self.shocks),
+            default_by_group=dict(self.default_by_group),
+            resolver=resolver,
+        )
 
     def shock_for(self, asset_name: str) -> float:
+        """Shock de una clase de activo.
+
+        Orden: un shock puesto a mano por nombre gana siempre; si el activo es
+        propio, se promedia el shock de las clases del LTCMA de su clase —el
+        mismo principio que rige sus correlaciones—; si no, se deduce del
+        nombre por palabras clave.
+
+        Nótese que el promedio atraviesa los dos cortes de clases de activo que
+        conviven en el proyecto: la clase declarada usa los cuatro grupos de
+        `model/groups.py` y el shock usa los ocho de aquí. Es deliberado. La
+        alternativa —una tabla que traduzca de cuatro a ocho— sería una tercera
+        taxonomía y una convención inventada.
+        """
         if asset_name in self.shocks:
             return self.shocks[asset_name]
+
+        if self.resolver is not None:
+            miembros = self.resolver.members_of(asset_name)
+            if miembros:
+                return sum(self.shock_for(m) for m in miembros) / len(miembros)
+
         return self.default_by_group.get(group_of(asset_name), 0.0)
 
     def impact(self, allocation: Allocation) -> float:

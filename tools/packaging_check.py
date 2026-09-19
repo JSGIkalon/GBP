@@ -149,6 +149,29 @@ def main() -> int:
     assert dialog.options().title, "La ventana de exportacion no se pudo construir."
     dialog.close()
 
+    # Activos propios: la matriz extendida se construye en runtime, asi que
+    # conviene verificar congelado que numpy y el resto responden igual.
+    from gbp.model.assets import ORIGIN_CUSTOM, AssetClass
+    from gbp.model.groups import FIXED_INCOME
+
+    window.cmas.add(
+        AssetClass("Renta Fija Colombiana", 0.058, 0.12,
+                   origin=ORIGIN_CUSTOM, asset_class=FIXED_INCOME)
+    )
+    window._on_assets_changed()
+    assert "Renta Fija Colombiana" in window.available_assets, (
+        "El activo propio no entro en la matriz extendida."
+    )
+    propio = Allocation("Mixta", {"U.S. Large Cap": 0.6, "Renta Fija Colombiana": 0.4})
+    mixto = Scenario(
+        name="Mixto", initial_value=1_000_000.0, horizon=10,
+        strategies=[Strategy(allocation=propio)],
+    )
+    mezcla = simulate(mixto, window.cmas, window.correlations,
+                      SimulationSettings(n_paths=2_000, seed=7))
+    print(f"\nActivo propio        : simula, {len(window.correlations.names)} clases")
+    print(f"  prob. exito        : {mezcla.strategies[0].success_probability:.1%}")
+
     window.close()
 
     print("\nOK: recursos embebidos, persistencia en APPDATA, motor, interfaz e informe PDF.")
