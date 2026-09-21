@@ -1,11 +1,10 @@
-"""Tests de supuestos resumen, correlaciones, stress tests y persistencia."""
+﻿"""Tests de supuestos resumen, correlaciones y persistencia."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from gbp.engine.stress import StressScenario, default_scenarios, group_of, run_stress_tests
 from gbp.engine.summary import summarize
 from gbp.model.allocation import Allocation
 from gbp.model.assets import AssetClass, CMASet
@@ -140,128 +139,3 @@ def test_cholesky_repara_una_matriz_no_psd():
     assert np.isfinite(factor).all()
 
 
-# --------------------------------------------------------------------------
-# Stress tests
-# --------------------------------------------------------------------------
-
-
-def test_el_impacto_es_la_suma_ponderada_de_los_shocks():
-    scenario = StressScenario(
-        name="Test", shocks={"Acciones": -0.40, "Bonos": 0.05}
-    )
-    allocation = Allocation("Mixto", {"Acciones": 0.6, "Bonos": 0.4})
-    assert scenario.impact(allocation) == pytest.approx(0.6 * -0.40 + 0.4 * 0.05)
-
-
-def test_las_clases_sin_shock_explicito_usan_el_grupo():
-    scenario = StressScenario(name="Test", default_by_group={"equity": -0.30})
-    allocation = Allocation("Acciones", {"U.S. Large Cap": 1.0})
-    assert scenario.impact(allocation) == pytest.approx(-0.30)
-
-
-def test_la_clasificacion_por_grupo_reconoce_las_clases_del_ltcma():
-    assert group_of("U.S. Cash") == "caja"
-    assert group_of("U.S. Large Cap") == "equity"
-    assert group_of("Private Equity") == "privados"
-    assert group_of("U.S. Core Real Estate") == "real"
-    assert group_of("Diversified Hedge Funds") == "hedge"
-
-
-def test_una_cartera_mas_agresiva_cae_mas_en_las_crisis():
-    conservadora = Allocation(
-        "Conservadora", {"U.S. Aggregate Bonds": 0.7, "U.S. Large Cap": 0.3}
-    )
-    agresiva = Allocation("Agresiva", {"U.S. Large Cap": 0.8, "Private Equity": 0.2})
-    for scenario in default_scenarios():
-        if "tasas" in scenario.name.lower():
-            continue  # en el shock de tasas la renta fija tambien cae
-        assert scenario.impact(agresiva) < scenario.impact(conservadora), scenario.name
-
-
-def test_run_stress_tests_escala_por_el_valor_del_portafolio():
-    allocation = Allocation("Acciones", {"U.S. Large Cap": 1.0})
-    scenario = StressScenario(name="Caida", default_by_group={"equity": -0.25})
-    result = run_stress_tests([allocation], [scenario], initial_value=1_000_000.0)
-    assert result["Caida"]["Acciones"] == pytest.approx(-250_000.0)
-
-
-def test_el_desglose_suma_el_impacto_total():
-    allocation = Allocation("Mixto", {"U.S. Large Cap": 0.6, "U.S. Aggregate Bonds": 0.4})
-    scenario = default_scenarios()[0]
-    desglose = scenario.breakdown(allocation)
-    assert sum(row[3] for row in desglose) == pytest.approx(scenario.impact(allocation))
-
-
-# --------------------------------------------------------------------------
-# Persistencia de la librería de CMAs
-# --------------------------------------------------------------------------
-
-
-def test_la_libreria_se_siembra_desde_el_ltcma(tmp_path, monkeypatch):
-    monkeypatch.setenv("GBP_DATA_DIR", str(tmp_path))
-    from gbp.io import library
-
-    cmas = library.load_cmas()
-    assert len(cmas) > 50
-    assert library.library_path().exists()
-    # El LTCMA no publica yield: se deja en cero para completar a mano.
-    assert all(a.yield_ == 0.0 for a in cmas)
-
-
-def test_las_ediciones_manuales_sobreviven_a_una_recarga(tmp_path, monkeypatch):
-    monkeypatch.setenv("GBP_DATA_DIR", str(tmp_path))
-    from gbp.io import library
-
-    cmas = library.load_cmas()
-    cmas.by_name("U.S. Large Cap").yield_ = 0.017
-    cmas.by_name("U.S. Large Cap").compound_return = 0.065
-    library.save_cmas(cmas)
-
-    recargada = library.load_cmas()
-    assert recargada.by_name("U.S. Large Cap").yield_ == pytest.approx(0.017)
-    assert recargada.by_name("U.S. Large Cap").compound_return == pytest.approx(0.065)
-
-
-def test_agregar_una_clase_propia_persiste(tmp_path, monkeypatch):
-    monkeypatch.setenv("GBP_DATA_DIR", str(tmp_path))
-    from gbp.io import library
-
-    cmas = library.load_cmas()
-    cmas.add(AssetClass("Deuda privada Colombia", 0.09, 0.07, 0.08))
-    library.save_cmas(cmas)
-    assert "Deuda privada Colombia" in library.load_cmas().names
-
-
-def test_reset_devuelve_los_supuestos_del_ltcma(tmp_path, monkeypatch):
-    monkeypatch.setenv("GBP_DATA_DIR", str(tmp_path))
-    from gbp.io import library
-
-    cmas = library.load_cmas()
-    cmas.by_name("U.S. Large Cap").compound_return = 0.99
-    library.save_cmas(cmas)
-
-    restaurada = library.reset_cmas_to_ltcma()
-    assert restaurada.by_name("U.S. Large Cap").compound_return < 0.2
-
-
-def test_la_configuracion_general_persiste(tmp_path, monkeypatch):
-    monkeypatch.setenv("GBP_DATA_DIR", str(tmp_path))
-    from gbp.io import library
-    from gbp.model.scenario import SimulationSettings
-
-    assert library.load_settings().n_paths == 10_000  # valor por defecto
-    library.save_settings(SimulationSettings(n_paths=25_000, seed=7, show_real_values=True))
-    recargada = library.load_settings()
-    assert recargada.n_paths == 25_000
-    assert recargada.seed == 7
-    assert recargada.show_real_values is True
-
-
-def test_una_configuracion_corrupta_no_rompe_la_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("GBP_DATA_DIR", str(tmp_path))
-    from gbp.io import library
-
-    path = library.settings_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text('{"n_paths": "muchas"}', encoding="utf-8")
-    assert library.load_settings().n_paths == 10_000

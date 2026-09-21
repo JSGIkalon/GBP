@@ -267,17 +267,31 @@ def test_la_vista_agrupada_usa_la_clase_declarada(window):
     assert agrupado[FIXED_INCOME] == pytest.approx(0.4)
 
 
-def test_el_shock_de_estres_de_un_activo_propio_no_es_cero(window):
+def test_un_activo_propio_aparece_en_su_clase_declarada_en_la_asignacion(window):
+    """La grafica de asignacion agrupa el activo propio donde el analista dijo.
+
+    Es la comprobacion de que el resolvedor llega hasta la vista: sin el, un
+    activo llamado "Renta Fija Colombiana" caeria en "Otros" porque `group_of`
+    deduce por palabras clave en ingles.
+    """
+    from gbp.model.allocation import Allocation
+    from gbp.model.strategy import Strategy
+
     window.cmas.add(AssetClass(**COLOMBIA))
     window._on_assets_changed()
 
-    escenario = next(s for s in window.stress_scenarios if "financiera" in s.name)
-    shock = escenario.shock_for("Renta Fija Colombiana")
-    assert shock != 0.0
+    window.scenario.strategies = [
+        Strategy(allocation=Allocation(
+            "Con propio", {"U.S. Large Cap": 0.6, "Renta Fija Colombiana": 0.4}
+        ))
+    ]
+    window.results.show_allocation(window.scenario, window.resolver)
 
-    miembros = window.resolver.members_of("Renta Fija Colombiana")
-    esperado = sum(escenario.shock_for(m) for m in miembros) / len(miembros)
-    assert shock == pytest.approx(esperado)
+    clases = {
+        window.results.allocation_table.item(r, 1).text()
+        for r in range(window.results.allocation_table.rowCount())
+    }
+    assert FIXED_INCOME in clases
 
 
 def test_los_botones_de_editar_se_deshabilitan_sobre_una_fila_del_ltcma(window):

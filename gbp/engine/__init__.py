@@ -1,1 +1,1 @@
-"""Motor de cálculo: Monte Carlo, supuestos resumen y stress tests."""
+"""Motor de cálculo: Monte Carlo y supuestos resumen."""

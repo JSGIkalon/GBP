@@ -12,9 +12,9 @@ El principio
     más su propio riesgo idiosincrático, con el retorno y la volatilidad que
     el analista fija.
 
-De ese único enunciado salen las tres cosas que el activo necesita y que nadie
-escribe: sus correlaciones (aquí), su shock de estrés (`gbp.engine.stress`) y
-su grupo en la vista agrupada (`gbp.model.groups`).
+De ese único enunciado salen las dos cosas que el activo necesita y que nadie
+escribe: sus correlaciones (aquí) y su grupo en la vista agrupada
+(`gbp.model.groups`).
 
 Por qué la matriz extendida es válida
 -------------------------------------

@@ -15,8 +15,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from gbp.engine.montecarlo import simulate
-from gbp.engine.stress import default_scenarios
-from gbp.io.report import ReportOptions, build_report
+from gbp.io.report import ReportOptions, _build_annex, build_report
 from gbp.model.allocation import Allocation
 from gbp.model.cashflows import CashFlow, FlowKind
 from gbp.model.leverage import LoanTerms
@@ -70,7 +69,7 @@ def test_el_informe_se_escribe_y_es_un_pdf(corrida, tmp_path):
         tmp_path / "informe.pdf",
         ReportOptions(title="Proyeccion", client="Familia X", author="Analista",
                       report_date=date(2026, 3, 15)),
-        escenario, result, settings, default_scenarios(),
+        escenario, result, settings,
     )
     assert path.exists()
     assert path.read_bytes().startswith(b"%PDF")
@@ -81,13 +80,14 @@ def test_las_secciones_desmarcadas_no_salen(corrida, tmp_path):
     escenario, result, settings = corrida
     completo = build_report(
         tmp_path / "completo.pdf", ReportOptions(),
-        escenario, result, settings, default_scenarios(),
+        escenario, result, settings,
     )
     minimo = build_report(
         tmp_path / "minimo.pdf",
         ReportOptions(include_distribution=False, include_summary=False,
-                      include_stress=False, include_debt=False, include_inputs=False),
-        escenario, result, settings, default_scenarios(),
+                      include_allocation=False, include_debt=False,
+                      include_inputs=False),
+        escenario, result, settings,
     )
     assert _paginas(minimo) == 1  # solo la portada
     assert _paginas(completo) > _paginas(minimo)
@@ -98,7 +98,7 @@ def test_la_portada_llega_a_los_metadatos(corrida, tmp_path):
     path = build_report(
         tmp_path / "meta.pdf",
         ReportOptions(title="Revision anual", author="Ikalon"),
-        escenario, result, settings, default_scenarios(),
+        escenario, result, settings,
     )
     raw = path.read_bytes()
     assert b"Revision anual" in raw
@@ -111,7 +111,7 @@ def test_un_caso_sin_deuda_omite_la_seccion_de_deuda(
     _, con_deuda_result, settings = corrida
     con_deuda = build_report(
         tmp_path / "con_deuda.pdf", ReportOptions(),
-        escenario, con_deuda_result, settings, default_scenarios(),
+        escenario, con_deuda_result, settings,
     )
 
     for strategy in escenario.strategies:
@@ -119,9 +119,44 @@ def test_un_caso_sin_deuda_omite_la_seccion_de_deuda(
     sin_deuda_result = simulate(escenario, simple_cmas, simple_corr, settings)
     sin_deuda = build_report(
         tmp_path / "sin_deuda.pdf", ReportOptions(),
-        escenario, sin_deuda_result, settings, default_scenarios(),
+        escenario, sin_deuda_result, settings,
     )
     assert _paginas(sin_deuda) < _paginas(con_deuda)
+
+
+def test_el_anexo_numera_las_tablas_de_las_secciones_incluidas(corrida):
+    """El anexo se arma antes de escribir y numera de corrido desde 1.
+
+    No se verifica sobre el PDF: matplotlib escribe el texto de pagina como
+    subconjuntos de glifos, asi que buscar la palabra "Anexo" en los bytes no
+    la encuentra aunque este impresa. El contrato que importa vive en
+    `_build_annex`, que es lo que citan las graficas.
+    """
+    escenario, result, settings = corrida
+    years = settings.milestones_within(escenario.horizon)
+
+    annex = _build_annex(
+        ReportOptions(), escenario, result, years, False, True, "Valores nominales."
+    )
+    assert [t.number for t in annex] == [1, 2, 3]
+    assert [t.reference for t in annex] == [
+        "Anexo · Tabla 1", "Anexo · Tabla 2", "Anexo · Tabla 3"
+    ]
+    assert all(t.rows for t in annex), "Una tabla del anexo salio vacia"
+
+
+def test_una_seccion_excluida_no_deja_su_tabla_en_el_anexo(corrida):
+    """Un anexo con el detalle de una grafica ausente no lo entenderia nadie."""
+    escenario, result, settings = corrida
+    years = settings.milestones_within(escenario.horizon)
+
+    annex = _build_annex(
+        ReportOptions(include_distribution=False), escenario, result, years,
+        False, False, "Valores nominales.",
+    )
+    titulos = [t.title for t in annex]
+    assert titulos == ["Asignación de activos por sub-clase"]
+    assert annex[0].number == 1  # renumera, no deja huecos
 
 
 # --------------------------------------------------------------------------

@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..engine.stress import default_scenarios
 from ..io import library
 from ..io.caseio import (
     EXTENSION,
@@ -69,7 +68,6 @@ class MainWindow(QMainWindow):
         self.base_correlations = CorrelationMatrix.load()
         self.correlations = self.base_correlations
         self.resolver = None
-        self.stress_scenarios = default_scenarios()
         self._rebuild_market_model()
         # Se restaura el caso de la sesión anterior. El caso de ejemplo solo
         # aparece la primera vez: volver a ver los mismos supuestos de fábrica
@@ -310,17 +308,14 @@ class MainWindow(QMainWindow):
     def _rebuild_market_model(self):
         """Recalcula lo que depende de los activos propios de la librería.
 
-        Un único sitio para que la matriz extendida, el resolvedor de clases y
-        los escenarios de estrés no puedan quedar desacompasados entre sí. Es
-        barato —un producto de 59×k— así que se llama sin miramientos.
+        Un único sitio para que la matriz extendida y el resolvedor de clases no
+        puedan quedar desacompasados entre sí. Es barato —un producto de 59×k—
+        así que se llama sin miramientos.
         """
         self.correlations = extend_correlations(
             self.base_correlations, custom_pairs(self.cmas)
         )
         self.resolver = resolver_for(self.cmas, self.base_correlations)
-        self.stress_scenarios = [
-            s.with_resolver(self.resolver) for s in default_scenarios()
-        ]
 
     def _on_assets_changed(self):
         self._rebuild_market_model()
@@ -338,7 +333,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_dependent_views(self):
         self.correlation_panel.set_used_assets(self.scenario.asset_names)
-        self.results.show_stress(self.scenario, self.stress_scenarios)
+        self.results.show_allocation(self.scenario, self.resolver)
         title = self.scenario.name
         if self.current_path:
             title = f"{title} — {self.current_path.name}"
@@ -540,7 +535,7 @@ class MainWindow(QMainWindow):
         dialog.remember()
         try:
             written = build_report(
-                path, options, self.scenario, result, self.settings, self.stress_scenarios
+                path, options, self.scenario, result, self.settings
             )
         except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "No se pudo exportar", str(exc))

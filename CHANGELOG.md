@@ -416,3 +416,53 @@ Activos propios: la app deja de servir solo para patrimonios en EE.UU.
   camino es dejar elegir un activo de referencia concreto — la regla está
   aislada en `extend_correlations`, así que no obliga a rehacer nada.
 
+## Sesión 10 — 21 sep 2026
+
+Reestructuración del informe PDF y retiro del stress test.
+
+**Hecho**
+
+- **Las tablas de datos se mueven a un anexo numerado al final.** Cada gráfica
+  cita la suya ("Detalle en el Anexo · Tabla 2"). La de supuestos resumen se
+  queda en el cuerpo: es narrativa, no dato de consulta.
+- **Nueva lámina de asignación de activos** (`ui/charts/allocation_chart.py`),
+  en dos paneles: barra apilada por clase de activo arriba, barras agrupadas por
+  sub-clase abajo. También es pestaña en la interfaz, en el sitio que dejó el
+  stress test. No depende de la simulación: se ve mientras se arma el caso.
+- **Nuevo orden del documento**: portada, supuestos del caso, asignación,
+  distribución, supuestos resumen, deuda, anexo. Los supuestos del caso pasan a
+  ser la primera página después de la portada.
+- **El stress test se retira del proyecto**: se borran `engine/stress.py` y
+  `ui/charts/stress_chart.py`, su pestaña, su sección del informe y sus tests.
+- `ChartCanvas.panels()` y su gemelo en el adaptador del PDF: varios ejes
+  apilados para los gráficos que responden dos preguntas a la vez.
+- **157 tests**, todos en verde.
+
+**Decisiones y hallazgos**
+
+- **La gráfica de asignación no colorea las sub-clases por intensidad de su
+  clase.** Se probó: con siete sub-clases los pasos de intensidad de una clase
+  chocan con los de la vecina —el segundo tono de renta variable sale igual al
+  primero de renta fija— y el color deja de decir a qué clase pertenece cada
+  tramo. La paleta tiene cuatro pasos y no se inventan tonos, así que se separan
+  las dos preguntas en dos paneles y en el de detalle el color codifica la
+  **estrategia**, no la clase.
+- **Mezclar hacia blanco desatura.** El primer intento de rampa de intensidad
+  volvía gris el navy; subir la luminosidad en HLS dejando tono y saturación
+  intactos mantiene el azul. Queda anotado aunque la rampa no se use.
+- **El solapamiento del pie de página venía de `box_chart`**, que escribía su
+  nota con `annotate(xy=(0, -0.16), xycoords="axes fraction")`. Colgando por
+  debajo del eje, en la geometría de página del informe aterrizaba encima del
+  título y la fecha. Ahora va como `set_xlabel`, que el eje sí reserva, y la
+  nota de página bajó para dejarle sitio.
+- **Los números del anexo se reservan antes de escribir la primera página.** Las
+  gráficas del cuerpo los citan y el PDF se escribe de una sola pasada con
+  `PdfPages`; sin reservarlos primero harían falta dos.
+- La lámina de asignación usa un margen izquierdo mucho más ancho que las demás
+  —los nombres de sub-clase son largos— así que su titular recibe un
+  desplazamiento explícito para no quedar sangrado media página.
+- **La auditoría visual encontró cinco defectos que ningún test ve**: las dos
+  notas al pie pegadas, el orden de estrategias invertido entre los dos paneles,
+  la leyenda del gráfico de deuda encima de la línea, el titular sangrado y los
+  años rotulados como 2.5 / 5.0.
+

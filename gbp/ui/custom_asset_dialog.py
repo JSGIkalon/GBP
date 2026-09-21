@@ -59,8 +59,8 @@ class CustomAssetDialog(QDialog):
 
         intro = QLabel(
             "Un activo propio sirve para patrimonio que el LTCMA no cubre. Tú fijas "
-            "el retorno y la volatilidad; la app deriva las correlaciones y el "
-            "comportamiento en estrés del promedio de la clase que elijas."
+            "el retorno y la volatilidad; la app deriva las correlaciones del "
+            "promedio de la clase que elijas."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -263,7 +263,7 @@ class ConflictDialog(QDialog):
             status_dot(
                 STATUS_WARNING,
                 "Un cambio de <b>clase</b> pesa más que uno de número: cambia las "
-                "correlaciones derivadas y el comportamiento en estrés.",
+                "correlaciones derivadas.",
             )
         )
         nota.setWordWrap(True)

@@ -39,8 +39,8 @@ class AssetClass:
 
     Una clase **propia** —patrimonio que el LTCMA no cubre, como renta fija
     colombiana— declara además a qué clase de activo pertenece. Esa declaración
-    es la que permite derivarle correlaciones y shocks de estrés, porque no los
-    tiene publicados: ver `gbp.model.custom_assets`.
+    es la que permite derivarle correlaciones, porque no las tiene publicadas:
+    ver `gbp.model.custom_assets`.
     """
 
     name: str

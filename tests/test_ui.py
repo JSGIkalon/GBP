@@ -264,9 +264,12 @@ def test_la_simulacion_completa_produce_resultados(window):
     assert "%" in window.results.headline.text()
 
 
-def test_el_stress_test_se_muestra_sin_simular(window):
-    window.results.show_stress(window.scenario, window.stress_scenarios)
-    assert window.results.stress_table.rowCount() == 3 * len(window.stress_scenarios)
+def test_la_asignacion_se_muestra_sin_simular(window):
+    window.results.show_allocation(window.scenario, window.resolver)
+    filas = sum(
+        len([w for w in s.weights.values() if w]) for s in window.scenario.strategies
+    )
+    assert window.results.allocation_table.rowCount() == filas
 
 
 def test_caso_nuevo_conserva_la_libreria_de_supuestos(window):
@@ -361,7 +364,7 @@ def test_los_graficos_dibujan_sin_error(window):
 
     for canvas in (
         window.results.box_canvas,
-        window.results.stress_canvas,
+        window.results.allocation_canvas,
         window.results.debt_canvas,
     ):
         assert canvas.figure.get_axes(), "El lienzo quedo sin ejes"

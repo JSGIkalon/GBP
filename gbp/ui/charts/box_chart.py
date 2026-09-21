@@ -116,12 +116,15 @@ def draw_box_chart(canvas, result: SimulationResult, years: list[int], real: boo
         _label_box(ax, pos, stat, on_fill, fill, label_all, span)
 
     if n_strategies >= 2:
+        # Sin `mode="expand"`: estiraba las entradas a los extremos opuestos del
+        # eje y con dos estrategias parecía un error de maquetación.
         ax.legend(
             loc="lower left",
-            bbox_to_anchor=(0, 1.02, 1, 0.12),
-            mode="expand",
+            bbox_to_anchor=(0, 1.02),
             ncol=min(n_strategies, 4),
             borderaxespad=0,
+            columnspacing=1.6,
+            handlelength=1.4,
         )
     ax.set_title(
         "La mitad central de los resultados cae dentro de la caja",
@@ -130,17 +133,14 @@ def draw_box_chart(canvas, result: SimulationResult, years: list[int], real: boo
         pad=28 if n_strategies >= 2 else 10,
     )
 
+    # La nota va **dentro del eje**, no colgando por debajo en coordenadas de
+    # eje: con `xy=(0, -0.16)` caía fuera del área de trazado y, en la geometría
+    # de página del PDF, aterrizaba justo encima del pie de página —el título y
+    # la fecha impresos por `_new_page`— y los dos textos se superponían.
     footnote = "Caja: percentil 25 al 75 · Bigotes: percentil 10 al 90 · Línea: mediana"
     if not label_all:
         footnote += " — solo se etiqueta la mediana; el resto está en la tabla"
-    ax.annotate(
-        footnote,
-        xy=(0, -0.16),
-        xycoords="axes fraction",
-        fontsize=8,
-        color=INK_SOFT,
-        va="top",
-    )
+    ax.set_xlabel(footnote, fontsize=8, color=INK_SOFT, loc="left", labelpad=10)
 
     def probe(x_data, y_data, _ax):
         if x_data is None:

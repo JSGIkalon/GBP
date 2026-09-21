@@ -24,8 +24,9 @@ Investments Corp., jun 2026), que se usa como caso de control del motor.
 | 7 | Margin call corregido, sesión persistente, vista por clase de activo | **Completa** |
 | 8 | «Empezar de cero», autoguardado de sesión, aviso de escala del capital | **Completa** |
 | 9 | Activos propios: patrimonio fuera del universo del LTCMA | **Completa** |
+| 10 | Informe con anexo de tablas, lámina de asignación de activos, retiro del stress test | **Completa** |
 
-**La aplicación está terminada y funcionando.** 167 tests en verde y `dist\GBP.exe`
+**La aplicación está terminada y funcionando.** 157 tests en verde y `dist\GBP.exe`
 (81.3 MB) verificado con `tools/packaging_check.py` congelado: recursos
 embebidos, persistencia en `%APPDATA%`, motor, interfaz e informe PDF.
 
@@ -89,25 +90,25 @@ gbp/
   model/         assets, correlation, allocation, strategy, cashflows, leverage,
                  scenario, results, groups (agregación en clases de activo),
                  custom_assets (activos propios fuera del LTCMA)
-  engine/        montecarlo, summary, stress
+  engine/        montecarlo, summary
   io/            library (CMAs + config global), caseio (casos de cliente),
                  report (informe PDF)
   ui/            main_window, worker (hilo), theme, brand, sample_case,
                  export_dialog, custom_asset_dialog
     panels/      scenario, strategies (con cashflow, leverage, capital dentro),
                  assets, correlation, settings, results
-    charts/      canvas (con hover), box_chart, stress_chart, debt_chart
+    charts/      canvas (con hover), box_chart, allocation_chart, debt_chart
 tools/           import_ltcma, extract_brand, smoke_pdf_case, packaging_check,
                  screenshot, build_exe.ps1
-tests/           167 tests
+tests/           157 tests
 ```
 
 ### El modelo de estrategia
 
-`Allocation` son **solo pesos** — es lo que consumen los supuestos resumen y el
-stress test, que no saben nada de flujos. `Strategy` la envuelve y le agrega los
-flujos, el crédito y un capital inicial opcional. Por eso el refactor a
-estrategias independientes no tocó `engine/summary.py` ni `engine/stress.py`.
+`Allocation` son **solo pesos** — es lo que consumen los supuestos resumen y la
+vista de asignación, que no saben nada de flujos. `Strategy` la envuelve y le
+agrega los flujos, el crédito y un capital inicial opcional. Por eso el refactor
+a estrategias independientes no tocó `engine/summary.py`.
 
 El sorteo de retornos es **único para toda la corrida**: se hace una vez sobre la
 unión de clases de activo y lo comparten todas las estrategias. Es lo que hace
@@ -170,9 +171,9 @@ activo necesita su fila. El principio que lo resuelve:
 > Un activo propio se comporta como **el promedio de su clase de activo**, más
 > su propio riesgo idiosincrático.
 
-De ese único enunciado salen las tres cosas que nadie escribe: correlaciones
-(`model/custom_assets.py`), shock de estrés (`engine/stress.py`) y grupo en la
-vista agrupada (`model/groups.py`). El analista solo elige la clase.
+De ese único enunciado salen las dos cosas que nadie escribe: correlaciones
+(`model/custom_assets.py`) y grupo en la vista agrupada (`model/groups.py`). El
+analista solo elige la clase.
 
 **Por qué la matriz extendida es válida.** Siendo `p` el portafolio
 equiponderado de la clase en retornos estandarizados, el activo se construye
@@ -217,17 +218,17 @@ librería con otros números, **manda el caso** por defecto: un informe entregad
 a un cliente tiene que poder reproducirse tal cual. Se puede adoptar en la
 librería o quedarse con la local, pero nunca en silencio.
 
-### Dos cortes de clases de activo, y por qué no son el mismo
+### El corte de clases de activo
 
 `gbp/model/groups.py` agrega las 59 sub-clases en **cuatro**: renta variable,
 renta fija, alternativos y caja. Es la lectura de comité, y es **solo vista**:
 los pesos se cargan siempre por sub-clase, que es el nivel al que existen
 retorno, volatilidad y correlación.
 
-`gbp/engine/stress.py` agrupa en **ocho** bloques distintos. No es duplicación:
-aquel corte responde "qué se mueve junto en una crisis" y este "cómo se lee la
-asignación". Un solo corte que sirviera para las dos preguntas no serviría para
-ninguna — el stress necesita separar gobierno de crédito, y el comité no.
+Es el corte que usa la lámina de asignación de activos para colorear la barra
+apilada: cuatro clases caben en los cuatro pasos de la rampa azul del manual, y
+por eso el detalle por sub-clase va en un panel aparte donde el color codifica
+la estrategia en vez de la clase.
 
 Dos fronteras del corte de cuatro son convención, no verdad, y están declaradas
 en el módulo: **Direct Lending y Commercial Mortgage Loans van a alternativos**
@@ -260,8 +261,17 @@ desincronizarse de lo que el usuario vio. El adaptador `_FigureCanvas` finge ser
 el lienzo de Qt (`clear`, `set_hover_probe`, `finish`) sobre una figura suelta.
 El precio es paginar las tablas a mano, en `_table_pages`.
 
-Dos reglas que conviene no deshacer:
+**Estructura**: portada · supuestos del caso · asignación de activos ·
+distribución · supuestos resumen · deuda · **anexo**. Las tablas de datos van
+todas al anexo y cada gráfica cita la suya por número ("Detalle en el Anexo ·
+Tabla 2"). La de supuestos resumen es la excepción y se queda en el cuerpo: no
+es un dato que se consulte sino la explicación de con qué se proyectó.
 
+Tres reglas que conviene no deshacer:
+
+- **Los números del anexo se reservan antes de escribir la primera página**, en
+  `_build_annex`. Las gráficas del cuerpo los citan y el PDF se escribe de una
+  sola pasada con `PdfPages`; sin reservarlos primero harían falta dos.
 - **Las páginas de gráfico no llevan titular propio.** Cada gráfico ya abre con
   su frase descriptiva, que es una regla del manual y vive dentro de la función
   que lo dibuja. Poner otro encima lo duplica palabra por palabra.
@@ -269,6 +279,12 @@ Dos reglas que conviene no deshacer:
   glifos. En pantalla no se nota porque Qt hace fallback de fuente; en el PDF
   matplotlib los dibuja como cuadros vacíos. Las viñetas de color son
   rectángulos dibujados (`_swatch`), no texto.
+- **Un gráfico no cuelga texto por debajo de su eje.** `annotate` con
+  `xycoords="axes fraction"` y un `y` negativo funciona en pantalla, donde el
+  lienzo es todo el widget, y aterriza encima del pie de página en el informe,
+  donde el eje es un rectángulo dentro de una hoja. Lo que va bajo el eje se
+  pone con `set_xlabel`, que el eje sí reserva. Costó un solapamiento en la
+  lámina de distribución.
 
 ### Dos trampas de Qt que ya costaron un bug cada una
 
@@ -371,18 +387,10 @@ retiro de 1.1MM al año por 29 años, inflación 2.5%.
 El total de retiros coincide exactamente (47.2MM). La probabilidad de éxito da
 86.9% contra el 83.6% publicado.
 
-**Stress tests** — los shocks por grupo, que se calibraron a ojo y no desde
-series históricas, resultan sorprendentemente cerca de la lámina 11 del PDF:
-
-| Escenario | Actual sim/JPM | Balanceado sim/JPM | Growth sim/JPM |
-|---|---|---|---|
-| Covid-19 | −17.4% / −16% | −15.1% / −14% | −22.1% / −20% |
-| Crisis financiera | −29.6% / −29% | −25.8% / −26% | −36.3% / −34% |
-| Puntocom | −17.1% / −16% | −11.5% / −11% | −29.0% / −28% |
-
-Es una coincidencia razonable, no una validación: los shocks son estimaciones
-editables, no retornos de índices. Sirve para confirmar que la ponderación por
-clase de activo se comporta como debe.
+El stress test que existió hasta la sesión 10 comparaba razonablemente contra la
+lámina 11, pero se retiró del producto: eran shocks definidos a mano, no
+retornos de índices, y la comparación nunca llegó a ser una validación. El
+histórico de esa comparación queda en el CHANGELOG.
 
 **Por qué queda algo optimista.** El motor es levemente más benigno en la cola
 baja. Dos causas conocidas, ninguna atribuible a un error de cálculo:
@@ -409,9 +417,9 @@ escenario, que cerraría buena parte de la diferencia.
   `cma_library.json` o extender el importador; queda pendiente decidir cuál.
 - **Comisión de gestión**: no modelada. Ver arriba.
 - **Impuestos**: fuera de v1 por decisión explícita.
-- **Stress tests**: hoy son shocks definidos a mano, con cuatro escenarios
-  precargados (Covid, GFC, puntocom, shock de tasas 2022). Los shocks calculados
-  desde series reales y el backtest de rolling returns y drawdowns dependen de
+- **Análisis de escenarios adversos**: el stress test por shocks manuales se
+  retiró en la sesión 10. Si vuelve, debería calcularse desde series reales, no
+  a mano — eso y el backtest de rolling returns y drawdowns dependen de
   incorporar datos históricos, que quedó para después.
 - **Reparación PSD.** La matriz publicada no es exactamente semidefinida positiva
   (autovalor mínimo −0.016, normal por el redondeo a dos decimales). El JSON

@@ -1,4 +1,4 @@
-"""Pestañas de resultados: distribución, supuestos, estrés y deuda.
+"""Pestañas de resultados: distribución, supuestos, asignación y deuda.
 
 La distribución hace el trabajo que antes se repartía entre dos pestañas: el
 box plot muestra el rango y la tabla de abajo trae las cifras exactas, que es
@@ -21,13 +21,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...engine.stress import StressScenario
 from ...model.results import SimulationResult
 from ...model.scenario import Scenario, SimulationSettings
+from ..charts.allocation_chart import allocation_table_rows, draw_allocation_chart
 from ..charts.box_chart import distribution_table_rows, draw_box_chart
 from ..charts.canvas import ChartCanvas
 from ..charts.debt_chart import draw_debt_chart
-from ..charts.stress_chart import draw_stress_chart
 from ..theme import BLUE_MID, INK_SOFT, format_money, status_color, status_dot
 
 EMPTY = "Carga los datos del caso y pulsa «Correr simulación»."
@@ -98,23 +97,25 @@ class ResultsPanel(QTabWidget):
         s_layout.addWidget(note)
         self.addTab(summary, "Supuestos")
 
-        # --- Stress test ------------------------------------------------
-        stress = QWidget()
-        st_layout = QVBoxLayout(stress)
-        self.stress_canvas = ChartCanvas(height=4.0)
-        st_layout.addWidget(self.stress_canvas, 3)
-        self.stress_columns = ["Escenario", "Estrategia", "Impacto %", "Pérdida"]
-        self.stress_table = _table(self.stress_columns)
-        st_layout.addWidget(self.stress_table, 2)
-        stress_note = QLabel(
-            "Los shocks son estimaciones editables por clase de activo, no retornos de "
-            "índices reales. El cálculo desde series históricas queda para cuando se "
-            "incorporen datos de mercado."
+        # --- Asignación de activos --------------------------------------
+        allocation = QWidget()
+        a_layout = QVBoxLayout(allocation)
+        self.allocation_canvas = ChartCanvas(height=5.2)
+        a_layout.addWidget(self.allocation_canvas, 3)
+        self.allocation_columns = [
+            "Estrategia", "Clase de activo", "Sub-clase", "Peso",
+        ]
+        self.allocation_table = _table(self.allocation_columns)
+        a_layout.addWidget(self.allocation_table, 2)
+        allocation_note = QLabel(
+            "Los pesos están normalizados sobre el total cargado de cada estrategia. "
+            "La agrupación en cuatro clases es una vista de lectura: los pesos se "
+            "cargan siempre por sub-clase."
         )
-        stress_note.setWordWrap(True)
-        stress_note.setStyleSheet("color: #5C6770;")
-        st_layout.addWidget(stress_note)
-        self.addTab(stress, "Stress test")
+        allocation_note.setWordWrap(True)
+        allocation_note.setStyleSheet("color: #5C6770;")
+        a_layout.addWidget(allocation_note)
+        self.addTab(allocation, "Asignación")
 
         # --- Deuda ------------------------------------------------------
         debt = QWidget()
@@ -139,32 +140,18 @@ class ResultsPanel(QTabWidget):
         for table in (self.range_table, self.summary_table, self.debt_table):
             table.setRowCount(0)
 
-    def show_stress(
-        self, scenario: Scenario, scenarios: list[StressScenario]
-    ):
-        """El stress test no depende de la simulación: se puede ver sin correrla.
+    def show_allocation(self, scenario: Scenario, resolver=None):
+        """La asignación no depende de la simulación: se ve sin haberla corrido.
 
-        El impacto se calcula sobre el capital con que arranca cada estrategia,
-        que puede ser el del escenario o uno propio.
+        Es lo que hace útil la pestaña mientras se arma el caso: los pesos se
+        editan al lado y aquí se ve de inmediato en qué queda el reparto.
         """
-        strategies = [s for s in scenario.strategies if s.asset_names]
-        allocations = [s.allocation for s in strategies]
-        draw_stress_chart(self.stress_canvas, allocations, scenarios, scenario.initial_value)
-
-        rows = []
-        for stress in scenarios:
-            for strategy in strategies:
-                impact = stress.impact(strategy.allocation)
-                capital = strategy.resolved_initial(scenario.initial_value)
-                rows.append(
-                    {
-                        "Escenario": stress.name,
-                        "Estrategia": strategy.name,
-                        "Impacto %": f"{impact * 100:.2f}",
-                        "Pérdida": format_money(impact * capital),
-                    }
-                )
-        _fill(self.stress_table, rows, self.stress_columns)
+        draw_allocation_chart(self.allocation_canvas, scenario, resolver)
+        _fill(
+            self.allocation_table,
+            allocation_table_rows(scenario, resolver),
+            self.allocation_columns,
+        )
 
     def show_result(self, result: SimulationResult, settings: SimulationSettings, horizon: int):
         self.result = result

@@ -35,7 +35,7 @@ INPUT_SHOTS = [
     (4, None, "configuracion"),
 ]
 
-RESULT_SHOTS = ["distribucion", "supuestos", "stress", "deuda"]
+RESULT_SHOTS = ["distribucion", "supuestos", "asignacion", "deuda"]
 
 
 def main() -> int:

@@ -120,7 +120,7 @@ def main() -> int:
     assert window.results.range_table.rowCount() > 0, "La tabla de proyeccion quedo vacia."
     for name, canvas in (
         ("distribucion", window.results.box_canvas),
-        ("stress", window.results.stress_canvas),
+        ("asignacion", window.results.allocation_canvas),
         ("deuda", window.results.debt_canvas),
     ):
         assert canvas.figure.get_axes(), f"El grafico de {name} no se dibujo."
@@ -138,7 +138,7 @@ def main() -> int:
     build_report(
         pdf_path,
         ReportOptions(title="Chequeo de empaquetado", client="Humo", author="CI"),
-        window.scenario, ui_result, window.settings, window.stress_scenarios,
+        window.scenario, ui_result, window.settings,
     )
     assert pdf_path.exists() and pdf_path.read_bytes().startswith(b"%PDF"), (
         "El informe PDF no se genero dentro del ejecutable."

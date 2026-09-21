@@ -88,13 +88,13 @@ class ExportDialog(QDialog):
 
         sections = QGroupBox("Secciones")
         sections_layout = QVBoxLayout(sections)
-        self.distribution = QCheckBox("Distribución del patrimonio (gráfico y tabla)")
-        self.summary = QCheckBox("Supuestos resumen por estrategia")
-        self.stress = QCheckBox("Stress test")
-        self.debt = QCheckBox("Deuda y llamadas a margen")
         self.inputs = QCheckBox("Supuestos del caso (pesos, flujos y crédito)")
+        self.allocation = QCheckBox("Asignación de activos")
+        self.distribution = QCheckBox("Distribución del patrimonio")
+        self.summary = QCheckBox("Supuestos resumen por estrategia")
+        self.debt = QCheckBox("Deuda y llamadas a margen")
         self.disclaimer = QCheckBox("Aviso legal en la portada")
-        for box in (self.distribution, self.summary, self.stress, self.inputs,
+        for box in (self.inputs, self.allocation, self.distribution, self.summary,
                     self.disclaimer):
             box.setChecked(True)
             sections_layout.addWidget(box)
@@ -103,7 +103,15 @@ class ExportDialog(QDialog):
         self.debt.setEnabled(has_debt)
         if not has_debt:
             self.debt.setText("Deuda y llamadas a margen (el caso no tiene crédito)")
-        sections_layout.insertWidget(3, self.debt)
+        # Justo antes del aviso legal, que es el orden en que salen en el PDF.
+        sections_layout.insertWidget(4, self.debt)
+        annex_note = QLabel(
+            "Las tablas de datos van al final, en un anexo numerado que cada gráfica "
+            "cita. Se incluyen con su sección."
+        )
+        annex_note.setWordWrap(True)
+        annex_note.setStyleSheet(f"color: {INK_SOFT};")
+        sections_layout.addWidget(annex_note)
         layout.addWidget(sections)
 
         buttons = QDialogButtonBox(
@@ -126,7 +134,7 @@ class ExportDialog(QDialog):
             notes=self.notes.toPlainText().strip(),
             include_distribution=self.distribution.isChecked(),
             include_summary=self.summary.isChecked(),
-            include_stress=self.stress.isChecked(),
+            include_allocation=self.allocation.isChecked(),
             include_debt=self.debt.isChecked(),
             include_inputs=self.inputs.isChecked(),
             include_disclaimer=self.disclaimer.isChecked(),

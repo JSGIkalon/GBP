@@ -7,7 +7,8 @@ uno apalancado contra uno sin deuda, o uno con retiros tempranos contra otro que
 los aplaza— y no solo dos mezclas de activos.
 
 La `Allocation` que contiene sigue siendo solo pesos: es lo que consumen el
-cálculo de supuestos resumen y el stress test, que no saben nada de flujos.
+cálculo de supuestos resumen y la vista de asignación, que no saben nada de
+flujos.
 """
 
 from __future__ import annotations

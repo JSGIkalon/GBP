@@ -6,11 +6,6 @@ caja. Este módulo hace ese único trabajo, y solo de lectura: los pesos se sigu
 cargando por sub-clase, que es el nivel al que existen retorno, volatilidad y
 correlación. Agregar es una vista, nunca un input.
 
-Es deliberadamente distinto de `gbp/engine/stress.py`, que agrupa en ocho
-bloques para aplicar shocks. Aquel corte responde "qué se mueve junto en una
-crisis"; este responde "cómo se lee la asignación". Mezclarlos obligaría a que
-un solo corte sirviera para dos preguntas distintas, y no sirve para ninguna.
-
 Dos decisiones de frontera que conviene conocer, porque son convención y no
 verdad:
 
@@ -100,8 +95,8 @@ def ltcma_members(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
 class ClassResolver:
     """Sabe la clase de cualquier activo, incluidos los propios.
 
-    Existe para que `group_of` y los shocks de estrés puedan conocer la clase
-    **declarada** de un activo propio sin recurrir a estado global mutable:
+    Existe para que `group_of` pueda conocer la clase **declarada** de un
+    activo propio sin recurrir a estado global mutable:
     el resolvedor se construye una vez desde la librería y se pasa a quien lo
     necesite.
 

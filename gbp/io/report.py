@@ -15,6 +15,16 @@ paginarlas a mano. Está resuelto en `_table_pages`.
 
 El informe es un registro: cada página lleva la fecha, la semilla y el número de
 caminos, que es lo que permite reproducir la corrida exacta más adelante.
+
+Estructura
+----------
+Portada · supuestos del caso · asignación de activos · gráficas · **anexo**.
+
+Las tablas de datos van todas al anexo y cada gráfica cita la suya por número.
+La excepción es la de supuestos resumen, que se queda en el cuerpo: no es un
+dato que se consulte sino la explicación de con qué se proyectó. Los números del
+anexo se reservan antes de escribir la primera página —ver `_build_annex`—
+porque las gráficas del cuerpo los citan y el PDF se escribe de una sola pasada.
 """
 
 from __future__ import annotations
@@ -27,13 +37,12 @@ import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
 
-from ..engine.stress import StressScenario
 from ..model.groups import group_summary
 from ..model.results import SimulationResult
 from ..model.scenario import Scenario, SimulationSettings
+from ..ui.charts.allocation_chart import allocation_table_rows, draw_allocation_chart
 from ..ui.charts.box_chart import distribution_table_rows, draw_box_chart
 from ..ui.charts.debt_chart import draw_debt_chart
-from ..ui.charts.stress_chart import draw_stress_chart
 from ..ui.theme import (
     INK,
     INK_SOFT,
@@ -67,7 +76,7 @@ class ReportOptions:
     notes: str = ""
     include_distribution: bool = True
     include_summary: bool = True
-    include_stress: bool = True
+    include_allocation: bool = True
     include_debt: bool = True
     include_inputs: bool = True
     include_disclaimer: bool = True
@@ -101,6 +110,26 @@ class _FigureCanvas:
 
     def clear(self):
         return self.figure.add_axes(self._rect)
+
+    def panels(self, height_ratios):
+        """Los mismos ejes apilados que ofrece el lienzo de Qt, dentro del rect.
+
+        No se usa `Figure.subplots`: repartiría la figura entera e ignoraría el
+        rect, y el gráfico se comería la cabecera y el pie de la página.
+        """
+        x, y, width, height = self._rect
+        ratios = list(height_ratios)
+        gap = 0.10 * height / max(len(ratios) - 1, 1)  # aire entre paneles
+        usable = height - gap * (len(ratios) - 1)
+        alturas = [usable * r / sum(ratios) for r in ratios]
+
+        ejes = []
+        top = y + height
+        for alto in alturas:
+            top -= alto
+            ejes.append(self.figure.add_axes((x, top, width, alto)))
+            top -= gap
+        return ejes
 
     def set_hover_probe(self, _probe):
         pass
@@ -231,8 +260,18 @@ def _cover(pdf: PdfPages, options: ReportOptions, scenario: Scenario,
     pdf.savefig(figure)
 
 
+CHART_RECT = (0.08, 0.16, 0.86, 0.70)
+# La asignación de activos rotula cada barra con el nombre de su sub-clase
+# —"Emerging Markets Sovereign Debt" y parecidos—, así que necesita un margen
+# izquierdo mucho más ancho o el texto se sale de la hoja.
+ALLOCATION_RECT = (0.26, 0.16, 0.68, 0.70)
+# Cuánto hay que correr el titular de esa lámina, en fracción del ancho del eje,
+# para que quede alineado con el margen de la página como en el resto.
+ALLOCATION_TITLE_X = (MARGIN - ALLOCATION_RECT[0]) / ALLOCATION_RECT[2]
+
+
 def _chart_page(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: str,
-                draw, footnote: str = "") -> int:
+                draw, footnote: str = "", rect=CHART_RECT) -> int:
     """Página de un gráfico.
 
     **La página no pone titular propio.** Cada gráfico ya abre con su frase
@@ -242,10 +281,13 @@ def _chart_page(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: st
     pantalla deja al tooltip, que en papel no existe.
     """
     figure = _new_page(pdf, options, eyebrow, page_no)
-    draw(_FigureCanvas(figure, rect=(0.08, 0.16, 0.86, 0.70)))
+    draw(_FigureCanvas(figure, rect=rect))
     if footnote:
+        # Por **debajo** de la nota que el propio gráfico escribe bajo su eje
+        # —el box plot explica ahí sus percentiles—, no encima: a la misma
+        # altura las dos líneas quedaban pegadas y con sangrías distintas.
         for i, line in enumerate(_wrap(footnote, 150)):
-            figure.text(MARGIN, 0.098 - i * 0.021, line, color=INK_SOFT, fontsize=7.5)
+            figure.text(MARGIN, 0.062 - i * 0.021, line, color=INK_SOFT, fontsize=7.5)
     pdf.savefig(figure)
     return page_no + 1
 
@@ -288,7 +330,7 @@ def _table_pages(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: s
                 cell.set_text_props(color=INK)
 
         if footnote:
-            figure.text(MARGIN, 0.055, footnote, color=INK_SOFT, fontsize=7.5)
+            figure.text(MARGIN, 0.072, footnote, color=INK_SOFT, fontsize=7.5)
         pdf.savefig(figure)
         page_no += 1
     return page_no
@@ -476,42 +518,145 @@ def _custom_assets_page(pdf: PdfPages, options: ReportOptions, page_no: int,
 
 
 # ----------------------------------------------------------------------
+@dataclass
+class _AnnexTable:
+    """Una tabla del anexo, ya numerada.
+
+    Se arma **antes** de escribir ninguna página porque las gráficas del cuerpo
+    citan su número: "Detalle en el Anexo · Tabla 2". Sin reservar los números
+    primero habría que escribir el PDF en dos pasadas.
+    """
+
+    number: int
+    title: str
+    columns: list[str]
+    rows: list[list[str]]
+    footnote: str = ""
+
+    @property
+    def reference(self) -> str:
+        return f"Anexo · Tabla {self.number}"
+
+
+DISTRIBUTION_COLUMNS = [
+    "Estrategia", "Año", "p10", "p25", "Mediana", "p75", "p90", "Media", "Desv. est.",
+]
+
+
+def _build_annex(
+    options: ReportOptions,
+    scenario: Scenario,
+    result: SimulationResult,
+    years: list[int],
+    real: bool,
+    con_deuda: bool,
+    moneda: str,
+) -> list[_AnnexTable]:
+    """Las tablas del anexo, numeradas en el orden en que se imprimirán.
+
+    Solo entra la tabla de una sección que el usuario haya pedido: un anexo con
+    el detalle de una gráfica que no está en el documento no lo entendería nadie.
+    """
+    tablas: list[tuple[str, list[str], list[list[str]], str]] = []
+
+    if options.include_allocation:
+        columnas = ["Estrategia", "Clase de activo", "Sub-clase", "Peso"]
+        tablas.append((
+            "Asignación de activos por sub-clase",
+            columnas,
+            [[row[c] for c in columnas]
+             for row in allocation_table_rows(scenario, options.resolver)],
+            "Pesos normalizados sobre el total cargado de cada estrategia.",
+        ))
+
+    if options.include_distribution:
+        tablas.append((
+            "Patrimonio neto proyectado por año hito",
+            DISTRIBUTION_COLUMNS,
+            [[str(row[c]) for c in DISTRIBUTION_COLUMNS]
+             for row in distribution_table_rows(result, years, real)],
+            moneda,
+        ))
+
+    if con_deuda:
+        tablas.append((
+            "Llamadas a margen y liquidación forzada",
+            ["Estrategia", "Prob. llamada a margen", "Llamadas promedio",
+             "Liquidación máxima"],
+            [[s.name, f"{s.margin_call_probability:.1%}",
+              f"{s.margin_calls.mean():.2f}" if s.margin_calls.size else "0.00",
+              format_money(float(s.forced_sales.max())) if s.forced_sales.size else "0"]
+             for s in result.strategies],
+            "",
+        ))
+
+    return [
+        _AnnexTable(number=i, title=titulo, columns=columnas, rows=filas, footnote=nota)
+        for i, (titulo, columnas, filas, nota) in enumerate(tablas, start=1)
+    ]
+
+
 def build_report(
     path: str | Path,
     options: ReportOptions,
     scenario: Scenario,
     result: SimulationResult,
     settings: SimulationSettings,
-    stress_scenarios: list[StressScenario],
 ) -> Path:
-    """Escribe el PDF y devuelve la ruta."""
+    """Escribe el PDF y devuelve la ruta.
+
+    Orden del documento: portada, supuestos del caso, asignación de activos,
+    y luego las gráficas. **Las tablas van todas al anexo**, salvo la de
+    supuestos resumen, que es narrativa y no dato de consulta. Cada gráfica cita
+    la tabla que la respalda, de modo que el cuerpo se lee de corrido y el
+    detalle está donde se busca: al final.
+    """
     apply_matplotlib_style()
     path = Path(path)
     real = settings.show_real_values
     years = settings.milestones_within(scenario.horizon)
+    moneda = "Valores en moneda de hoy." if real else "Valores nominales."
+    con_deuda = options.include_debt and any(s.debt.max() > 0 for s in result.strategies)
+
+    annex = _build_annex(options, scenario, result, years, real, con_deuda, moneda)
+    por_titulo = {t.title: t for t in annex}
+
+    def cita(titulo: str, extra: str = "") -> str:
+        tabla = por_titulo.get(titulo)
+        if tabla is None:
+            return extra
+        return f"{extra} Detalle en el {tabla.reference}.".strip()
 
     with PdfPages(path) as pdf:
         _cover(pdf, options, scenario, result, settings)
         page = 2
 
+        if options.include_inputs:
+            page = _inputs_pages(pdf, options, page, scenario)
+
+        if options.include_allocation:
+            page = _chart_page(
+                pdf, options, page, "Asignación de activos",
+                lambda canvas: draw_allocation_chart(
+                    canvas, scenario, options.resolver, ALLOCATION_TITLE_X
+                ),
+                cita(
+                    "Asignación de activos por sub-clase",
+                    "Los pesos están normalizados sobre el total cargado de cada "
+                    "estrategia.",
+                ),
+                rect=ALLOCATION_RECT,
+            )
+
         if options.include_distribution:
             page = _chart_page(
                 pdf, options, page, "Distribución",
                 lambda canvas: draw_box_chart(canvas, result, years, real),
-                "Percentiles calculados sobre los caminos simulados, sin suponer forma "
-                "de distribución. "
-                + ("Valores en moneda de hoy." if real else "Valores nominales."),
-            )
-            page = _table_pages(
-                pdf, options, page, "Distribución",
-                "Patrimonio neto proyectado por año hito",
-                ["Estrategia", "Año", "p10", "p25", "Mediana", "p75", "p90", "Media",
-                 "Desv. est."],
-                [[str(row[c]) for c in
-                  ["Estrategia", "Año", "p10", "p25", "Mediana", "p75", "p90", "Media",
-                   "Desv. est."]]
-                 for row in distribution_table_rows(result, years, real)],
-                "Valores en moneda de hoy." if real else "Valores nominales.",
+                cita(
+                    "Patrimonio neto proyectado por año hito",
+                    "Percentiles calculados sobre los caminos simulados, sin suponer "
+                    f"forma de distribución. {moneda}",
+                ),
             )
 
         if options.include_summary:
@@ -524,53 +669,22 @@ def build_report(
                 "Los supuestos resumen explican la proyección; no son una predicción.",
             )
 
-        if options.include_stress:
-            allocations = [s.allocation for s in scenario.strategies if s.asset_names]
-            page = _chart_page(
-                pdf, options, page, "Stress test",
-                lambda canvas: draw_stress_chart(
-                    canvas, allocations, stress_scenarios, scenario.initial_value
-                ),
-                "Los shocks son estimaciones por clase de activo, no retornos de índices "
-                "reales. Son un choque instantáneo sobre el valor del portafolio, no una "
-                "trayectoria simulada.",
-            )
-            rows = []
-            for stress in stress_scenarios:
-                for strategy in scenario.strategies:
-                    if not strategy.asset_names:
-                        continue
-                    impact = stress.impact(strategy.allocation)
-                    capital = strategy.resolved_initial(scenario.initial_value)
-                    rows.append([stress.name, strategy.name, f"{impact * 100:.2f}%",
-                                 format_money(impact * capital)])
-            page = _table_pages(
-                pdf, options, page, "Stress test",
-                "Impacto de cada escenario sobre el capital inicial",
-                ["Escenario", "Estrategia", "Impacto %", "Pérdida"], rows,
-            )
-
-        if options.include_debt and any(s.debt.max() > 0 for s in result.strategies):
+        if con_deuda:
             page = _chart_page(
                 pdf, options, page, "Deuda",
                 lambda canvas: draw_debt_chart(canvas, result),
-                "Línea: mediana. Banda: percentil 5 al 95.",
-            )
-            rows = [
-                [s.name, f"{s.margin_call_probability:.1%}",
-                 f"{s.margin_calls.mean():.2f}" if s.margin_calls.size else "0.00",
-                 format_money(float(s.forced_sales.max())) if s.forced_sales.size else "0"]
-                for s in result.strategies
-            ]
-            page = _table_pages(
-                pdf, options, page, "Deuda",
-                "Llamadas a margen y liquidación forzada",
-                ["Estrategia", "Prob. llamada a margen", "Llamadas promedio",
-                 "Liquidación máxima"], rows,
+                cita(
+                    "Llamadas a margen y liquidación forzada",
+                    "Línea: mediana. Banda: percentil 5 al 95.",
+                ),
             )
 
-        if options.include_inputs:
-            page = _inputs_pages(pdf, options, page, scenario)
+        for tabla in annex:
+            page = _table_pages(
+                pdf, options, page, "Anexo",
+                f"Tabla {tabla.number} · {tabla.title}",
+                tabla.columns, tabla.rows, tabla.footnote,
+            )
 
         info = pdf.infodict()
         info["Title"] = options.title

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from matplotlib.ticker import MaxNLocator
 
 from ...model.results import SimulationResult
 from ..theme import INK, clean_axes, series_color
@@ -40,13 +41,26 @@ def draw_debt_chart(canvas, result: SimulationResult):
     ax.set_xlabel("Año")
     ax.set_ylabel(f"Saldo de la deuda ({unit})")
     ax.set_ylim(bottom=0)
+    # Los años son enteros: sin esto el eje rotulaba 2.5, 5.0, 7.5…
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     clean_axes(ax)
-    if len(result.strategies) >= 2:
-        ax.legend(loc="upper right", ncol=min(len(result.strategies), 3))
+    n = len(result.strategies)
+    if n >= 2:
+        # Fuera del área de trazado: un crédito que arranca al máximo deja la
+        # esquina superior derecha ocupada, y ahí la leyenda tapaba la línea.
+        ax.legend(
+            loc="lower left",
+            bbox_to_anchor=(0, 1.02),
+            ncol=min(n, 3),
+            borderaxespad=0,
+            columnspacing=1.6,
+            handlelength=1.4,
+        )
     ax.set_title(
         "El saldo de la deuda evoluciona según la amortización y las llamadas a margen",
         loc="left",
         color=INK,
+        pad=28 if n >= 2 else 10,
     )
 
     def probe(x_data, _y, _ax):

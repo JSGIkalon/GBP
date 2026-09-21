@@ -38,6 +38,19 @@ class ChartCanvas(FigureCanvasQTAgg):
         ax = self.figure.add_subplot(111)
         return ax
 
+    def panels(self, height_ratios):
+        """Varios ejes apilados, con las alturas relativas indicadas.
+
+        Existe para los gráficos que responden dos preguntas a la vez y no
+        pueden meterlas en un solo eje. La capa de hover ya trabaja por eje
+        —`_on_motion` usa `event.inaxes`— así que no hay nada más que adaptar.
+        """
+        self.figure.clear()
+        self._annotation = None
+        return self.figure.subplots(
+            len(height_ratios), 1, height_ratios=list(height_ratios)
+        )
+
     def set_hover_probe(self, probe: Callable[[float, float, object], str | None] | None):
         """Función que, dadas las coordenadas de datos, devuelve el texto a mostrar."""
         self._hover_probe = probe
