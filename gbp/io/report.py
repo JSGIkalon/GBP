@@ -18,13 +18,17 @@ caminos, que es lo que permite reproducir la corrida exacta más adelante.
 
 Estructura
 ----------
-Portada · supuestos del caso · asignación de activos · gráficas · **anexo**.
+Portada · supuestos del caso · gráficas · **anexo**.
 
-Las tablas de datos van todas al anexo y cada gráfica cita la suya por número.
-La excepción es la de supuestos resumen, que se queda en el cuerpo: no es un
-dato que se consulte sino la explicación de con qué se proyectó. Los números del
-anexo se reservan antes de escribir la primera página —ver `_build_annex`—
-porque las gráficas del cuerpo los citan y el PDF se escribe de una sola pasada.
+**En el cuerpo no va ninguna tabla.** Todas viven en el anexo, donde cada una
+es de **una sola estrategia** y están agrupadas por tipo: la asignación de A
+seguida de la de B, luego la distribución de A y la de B, y así. Agrupar por
+tipo y no por estrategia deja comparables las tablas que se leen juntas.
+
+Cada gráfica del cuerpo cita todas las tablas de su tipo —compara estrategias,
+así que su detalle está repartido en tantas tablas como estrategias haya. Los
+números se reservan antes de escribir la primera página, en `_build_annex`,
+porque el PDF se escribe de una sola pasada con `PdfPages`.
 """
 
 from __future__ import annotations
@@ -336,23 +340,6 @@ def _table_pages(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: s
     return page_no
 
 
-def _summary_rows(result: SimulationResult, real: bool) -> tuple[list[str], list[list[str]]]:
-    indicators = [
-        ("Probabilidad de éxito", lambda s: f"{s.success_probability:.1%}"),
-        ("Retorno de largo plazo", lambda s: f"{s.summary.arithmetic_return:.2%}"),
-        ("Volatilidad de largo plazo", lambda s: f"{s.summary.volatility:.2%}"),
-        ("Retorno compuesto", lambda s: f"{s.summary.compound_return:.2%}"),
-        ("Yield de largo plazo", lambda s: f"{s.summary.yield_:.2%}"),
-        ("Sharpe de largo plazo", lambda s: f"{s.summary.sharpe_ratio:.2f}"),
-        ("Patrimonio mediano final",
-         lambda s: format_money(float(np.median(s.terminal_values(real))))),
-        ("CVaR 5% al final", lambda s: format_money(s.cvar(s.horizon, 0.05, real))),
-    ]
-    columns = ["Indicador", *result.names]
-    rows = [[label, *[getter(s) for s in result.strategies]] for label, getter in indicators]
-    return columns, rows
-
-
 def _inputs_pages(pdf: PdfPages, options: ReportOptions, page_no: int,
                   scenario: Scenario) -> int:
     """Los inputs del caso, para que el informe sea reproducible sin el .gbp.json."""
@@ -520,26 +507,50 @@ def _custom_assets_page(pdf: PdfPages, options: ReportOptions, page_no: int,
 # ----------------------------------------------------------------------
 @dataclass
 class _AnnexTable:
-    """Una tabla del anexo, ya numerada.
+    """Una tabla del anexo, ya numerada. **Siempre de una sola estrategia.**
 
-    Se arma **antes** de escribir ninguna página porque las gráficas del cuerpo
-    citan su número: "Detalle en el Anexo · Tabla 2". Sin reservar los números
-    primero habría que escribir el PDF en dos pasadas.
+    El anexo se arma **antes** de escribir ninguna página porque las gráficas
+    del cuerpo citan sus números. Sin reservarlos primero habría que escribir el
+    PDF en dos pasadas.
+
+    `kind` es lo que permite la cita: una gráfica compara todas las estrategias,
+    así que remite a todas las tablas de su tipo de una vez.
     """
 
     number: int
-    title: str
+    kind: str
+    strategy: str
     columns: list[str]
     rows: list[list[str]]
     footnote: str = ""
 
     @property
-    def reference(self) -> str:
-        return f"Anexo · Tabla {self.number}"
+    def title(self) -> str:
+        return f"{self.kind} — {self.strategy}"
 
+
+# Tipos de tabla del anexo, en el orden en que se imprimen. El orden importa:
+# sigue al del cuerpo, así que quien lee una gráfica encuentra sus tablas antes
+# que las de la gráfica siguiente.
+ALLOCATION = "Asignación de activos"
+DISTRIBUTION = "Patrimonio neto proyectado"
+SUMMARY = "Supuestos resumen"
+DEBT = "Llamadas a margen y liquidación forzada"
 
 DISTRIBUTION_COLUMNS = [
-    "Estrategia", "Año", "p10", "p25", "Mediana", "p75", "p90", "Media", "Desv. est.",
+    "Año", "p10", "p25", "Mediana", "p75", "p90", "Media", "Desv. est.",
+]
+
+SUMMARY_INDICATORS = [
+    ("Probabilidad de éxito", lambda s, real: f"{s.success_probability:.1%}"),
+    ("Retorno de largo plazo", lambda s, real: f"{s.summary.arithmetic_return:.2%}"),
+    ("Volatilidad de largo plazo", lambda s, real: f"{s.summary.volatility:.2%}"),
+    ("Retorno compuesto", lambda s, real: f"{s.summary.compound_return:.2%}"),
+    ("Yield de largo plazo", lambda s, real: f"{s.summary.yield_:.2%}"),
+    ("Sharpe de largo plazo", lambda s, real: f"{s.summary.sharpe_ratio:.2f}"),
+    ("Patrimonio mediano final",
+     lambda s, real: format_money(float(np.median(s.terminal_values(real))))),
+    ("CVaR 5% al final", lambda s, real: format_money(s.cvar(s.horizon, 0.05, real))),
 ]
 
 
@@ -552,48 +563,93 @@ def _build_annex(
     con_deuda: bool,
     moneda: str,
 ) -> list[_AnnexTable]:
-    """Las tablas del anexo, numeradas en el orden en que se imprimirán.
+    """Las tablas del anexo: una por estrategia, agrupadas por tipo.
+
+    Agrupar por tipo y no por estrategia deja las tablas comparables una al lado
+    de la otra —la distribución de A seguida de la de B— que es cómo se leen.
 
     Solo entra la tabla de una sección que el usuario haya pedido: un anexo con
     el detalle de una gráfica que no está en el documento no lo entendería nadie.
     """
-    tablas: list[tuple[str, list[str], list[list[str]], str]] = []
+    pendientes: list[tuple[str, str, list[str], list[list[str]], str]] = []
 
     if options.include_allocation:
-        columnas = ["Estrategia", "Clase de activo", "Sub-clase", "Peso"]
-        tablas.append((
-            "Asignación de activos por sub-clase",
-            columnas,
-            [[row[c] for c in columnas]
-             for row in allocation_table_rows(scenario, options.resolver)],
-            "Pesos normalizados sobre el total cargado de cada estrategia.",
-        ))
+        columnas = ["Clase de activo", "Sub-clase", "Peso"]
+        filas_por_estrategia: dict[str, list[list[str]]] = {}
+        for row in allocation_table_rows(scenario, options.resolver):
+            filas_por_estrategia.setdefault(row["Estrategia"], []).append(
+                [row[c] for c in columnas]
+            )
+        for strategy in scenario.strategies:
+            filas = filas_por_estrategia.get(strategy.name)
+            if filas:
+                pendientes.append((
+                    ALLOCATION, strategy.name, columnas, filas,
+                    "Pesos normalizados sobre el total cargado de la estrategia.",
+                ))
 
     if options.include_distribution:
-        tablas.append((
-            "Patrimonio neto proyectado por año hito",
-            DISTRIBUTION_COLUMNS,
-            [[str(row[c]) for c in DISTRIBUTION_COLUMNS]
-             for row in distribution_table_rows(result, years, real)],
-            moneda,
-        ))
+        todas = distribution_table_rows(result, years, real)
+        for strategy in result.strategies:
+            filas = [
+                [str(row[c]) for c in DISTRIBUTION_COLUMNS]
+                for row in todas if row["Estrategia"] == strategy.name
+            ]
+            if filas:
+                pendientes.append(
+                    (DISTRIBUTION, strategy.name, DISTRIBUTION_COLUMNS, filas, moneda)
+                )
+
+    if options.include_summary:
+        for strategy in result.strategies:
+            pendientes.append((
+                SUMMARY, strategy.name, ["Indicador", "Valor"],
+                [[label, getter(strategy, real)] for label, getter in SUMMARY_INDICATORS],
+                "El Sharpe usa como tasa libre de riesgo el retorno de la clase de "
+                "caja. Los supuestos resumen explican la proyección; no son una "
+                "predicción.",
+            ))
 
     if con_deuda:
-        tablas.append((
-            "Llamadas a margen y liquidación forzada",
-            ["Estrategia", "Prob. llamada a margen", "Llamadas promedio",
-             "Liquidación máxima"],
-            [[s.name, f"{s.margin_call_probability:.1%}",
-              f"{s.margin_calls.mean():.2f}" if s.margin_calls.size else "0.00",
-              format_money(float(s.forced_sales.max())) if s.forced_sales.size else "0"]
-             for s in result.strategies],
-            "",
-        ))
+        for strategy in result.strategies:
+            pendientes.append((
+                DEBT, strategy.name, ["Indicador", "Valor"],
+                [
+                    ["Probabilidad de llamada a margen",
+                     f"{strategy.margin_call_probability:.1%}"],
+                    ["Llamadas promedio por camino",
+                     f"{strategy.margin_calls.mean():.2f}"
+                     if strategy.margin_calls.size else "0.00"],
+                    ["Liquidación forzada máxima",
+                     format_money(float(strategy.forced_sales.max()))
+                     if strategy.forced_sales.size else "0"],
+                ],
+                "",
+            ))
 
     return [
-        _AnnexTable(number=i, title=titulo, columns=columnas, rows=filas, footnote=nota)
-        for i, (titulo, columnas, filas, nota) in enumerate(tablas, start=1)
+        _AnnexTable(number=i, kind=kind, strategy=nombre, columns=columnas,
+                    rows=filas, footnote=nota)
+        for i, (kind, nombre, columnas, filas, nota) in enumerate(pendientes, start=1)
     ]
+
+
+def _cite(annex: list[_AnnexTable], kind: str, extra: str = "") -> str:
+    """Remite a todas las tablas del anexo de un tipo.
+
+    Una gráfica compara las estrategias entre sí, así que su detalle está
+    repartido en tantas tablas como estrategias haya.
+    """
+    numeros = [t.number for t in annex if t.kind == kind]
+    if not numeros:
+        return extra
+    if len(numeros) == 1:
+        referencia = f"Tabla {numeros[0]}"
+    elif len(numeros) == 2:
+        referencia = f"Tablas {numeros[0]} y {numeros[1]}"
+    else:
+        referencia = f"Tablas {numeros[0]} a {numeros[-1]}"
+    return f"{extra} Detalle en el Anexo · {referencia}.".strip()
 
 
 def build_report(
@@ -605,11 +661,10 @@ def build_report(
 ) -> Path:
     """Escribe el PDF y devuelve la ruta.
 
-    Orden del documento: portada, supuestos del caso, asignación de activos,
-    y luego las gráficas. **Las tablas van todas al anexo**, salvo la de
-    supuestos resumen, que es narrativa y no dato de consulta. Cada gráfica cita
-    la tabla que la respalda, de modo que el cuerpo se lee de corrido y el
-    detalle está donde se busca: al final.
+    Orden del documento: portada, supuestos del caso y luego las gráficas.
+    **En el cuerpo no va ninguna tabla**: todas viven en el anexo, una por
+    estrategia y agrupadas por tipo, y cada gráfica cita las suyas. Así el
+    cuerpo se lee de corrido y el detalle está donde se busca, al final.
     """
     apply_matplotlib_style()
     path = Path(path)
@@ -619,13 +674,6 @@ def build_report(
     con_deuda = options.include_debt and any(s.debt.max() > 0 for s in result.strategies)
 
     annex = _build_annex(options, scenario, result, years, real, con_deuda, moneda)
-    por_titulo = {t.title: t for t in annex}
-
-    def cita(titulo: str, extra: str = "") -> str:
-        tabla = por_titulo.get(titulo)
-        if tabla is None:
-            return extra
-        return f"{extra} Detalle en el {tabla.reference}.".strip()
 
     with PdfPages(path) as pdf:
         _cover(pdf, options, scenario, result, settings)
@@ -640,8 +688,8 @@ def build_report(
                 lambda canvas: draw_allocation_chart(
                     canvas, scenario, options.resolver, ALLOCATION_TITLE_X
                 ),
-                cita(
-                    "Asignación de activos por sub-clase",
+                _cite(
+                    annex, ALLOCATION,
                     "Los pesos están normalizados sobre el total cargado de cada "
                     "estrategia.",
                 ),
@@ -652,29 +700,19 @@ def build_report(
             page = _chart_page(
                 pdf, options, page, "Distribución",
                 lambda canvas: draw_box_chart(canvas, result, years, real),
-                cita(
-                    "Patrimonio neto proyectado por año hito",
+                _cite(
+                    annex, DISTRIBUTION,
                     "Percentiles calculados sobre los caminos simulados, sin suponer "
                     f"forma de distribución. {moneda}",
                 ),
-            )
-
-        if options.include_summary:
-            columns, rows = _summary_rows(result, real)
-            page = _table_pages(
-                pdf, options, page, "Supuestos resumen",
-                "Con qué retorno y qué riesgo se proyectó cada estrategia",
-                columns, rows,
-                "El Sharpe usa como tasa libre de riesgo el retorno de la clase de caja. "
-                "Los supuestos resumen explican la proyección; no son una predicción.",
             )
 
         if con_deuda:
             page = _chart_page(
                 pdf, options, page, "Deuda",
                 lambda canvas: draw_debt_chart(canvas, result),
-                cita(
-                    "Llamadas a margen y liquidación forzada",
+                _cite(
+                    annex, DEBT,
                     "Línea: mediana. Banda: percentil 5 al 95.",
                 ),
             )

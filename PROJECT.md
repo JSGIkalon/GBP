@@ -26,7 +26,7 @@ Investments Corp., jun 2026), que se usa como caso de control del motor.
 | 9 | Activos propios: patrimonio fuera del universo del LTCMA | **Completa** |
 | 10 | Informe con anexo de tablas, lámina de asignación de activos, retiro del stress test | **Completa** |
 
-**La aplicación está terminada y funcionando.** 157 tests en verde y `dist\GBP.exe`
+**La aplicación está terminada y funcionando.** 158 tests en verde y `dist\GBP.exe`
 (81.3 MB) verificado con `tools/packaging_check.py` congelado: recursos
 embebidos, persistencia en `%APPDATA%`, motor, interfaz e informe PDF.
 
@@ -37,7 +37,7 @@ py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
 .\.venv\Scripts\python.exe run.py                       # abre la aplicación
-.\.venv\Scripts\python.exe -m pytest tests\ -q          # 77 tests
+.\.venv\Scripts\python.exe -m pytest tests\ -q          # 158 tests
 .\tools\build_exe.ps1                                   # genera dist\GBP.exe
 
 $env:PYTHONPATH="."; .\.venv\Scripts\python.exe tools\smoke_pdf_case.py
@@ -100,7 +100,7 @@ gbp/
     charts/      canvas (con hover), box_chart, allocation_chart, debt_chart
 tools/           import_ltcma, extract_brand, smoke_pdf_case, packaging_check,
                  screenshot, build_exe.ps1
-tests/           157 tests
+tests/           158 tests
 ```
 
 ### El modelo de estrategia
@@ -262,10 +262,14 @@ el lienzo de Qt (`clear`, `set_hover_probe`, `finish`) sobre una figura suelta.
 El precio es paginar las tablas a mano, en `_table_pages`.
 
 **Estructura**: portada · supuestos del caso · asignación de activos ·
-distribución · supuestos resumen · deuda · **anexo**. Las tablas de datos van
-todas al anexo y cada gráfica cita la suya por número ("Detalle en el Anexo ·
-Tabla 2"). La de supuestos resumen es la excepción y se queda en el cuerpo: no
-es un dato que se consulte sino la explicación de con qué se proyectó.
+distribución · deuda · **anexo**.
+
+**En el cuerpo no va ninguna tabla.** Todas viven en el anexo, donde cada una es
+de **una sola estrategia** y están agrupadas por tipo: la asignación de A
+seguida de la de B, luego la distribución de A y la de B, y así. Agrupar por
+tipo y no por estrategia deja comparables las tablas que se leen juntas. Cada
+gráfica cita todas las tablas de su tipo —compara estrategias, así que su
+detalle está repartido— con `_cite`: *"Detalle en el Anexo · Tablas 3 y 4"*.
 
 Tres reglas que conviene no deshacer:
 

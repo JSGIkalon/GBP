@@ -436,7 +436,7 @@ Reestructuración del informe PDF y retiro del stress test.
   `ui/charts/stress_chart.py`, su pestaña, su sección del informe y sus tests.
 - `ChartCanvas.panels()` y su gemelo en el adaptador del PDF: varios ejes
   apilados para los gráficos que responden dos preguntas a la vez.
-- **157 tests**, todos en verde.
+- **158 tests**, todos en verde.
 
 **Decisiones y hallazgos**
 
@@ -465,4 +465,22 @@ Reestructuración del informe PDF y retiro del stress test.
   notas al pie pegadas, el orden de estrategias invertido entre los dos paneles,
   la leyenda del gráfico de deuda encima de la línea, el titular sangrado y los
   años rotulados como 2.5 / 5.0.
+
+**Ajuste posterior, misma sesión**
+
+- **El cuerpo del informe se queda sin ninguna tabla.** La de supuestos resumen
+  también se va al anexo; era la única que quedaba y no había razón para
+  tratarla distinto.
+- **Cada tabla del anexo es de una sola estrategia**, y se agrupan **por tipo**:
+  asignación de A, asignación de B, distribución de A, distribución de B, y así.
+  Agrupar por tipo y no por estrategia deja comparables las tablas que se leen
+  juntas. Con dos estrategias el anexo pasa de 3 tablas a 8.
+- Como una gráfica compara estrategias, su detalle queda repartido en varias
+  tablas: `_cite` remite a todas las de su tipo de una vez ("Tablas 3 y 4",
+  "Tablas 3 a 6") en vez de citar un número suelto.
+- `_summary_rows` quedó sin uso y se borró.
+- **Aviso para la próxima vez**: `Get-Content | Set-Content -Encoding utf8` en
+  PowerShell 5.1 destroza un archivo UTF-8 con tildes —lo lee como ANSI— y el
+  daño es con pérdida, así que no se puede revertir. Para editar texto, la
+  herramienta de edición; nunca un reemplazo por consola.
 
