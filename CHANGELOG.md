@@ -416,6 +416,34 @@ Activos propios: la app deja de servir solo para patrimonios en EE.UU.
   camino es dejar elegir un activo de referencia concreto — la regla está
   aislada en `extend_correlations`, así que no obliga a rehacer nada.
 
+## Sesión 13 — 22 sep 2026
+
+Los supuestos resumen pasan del anexo al cuerpo.
+
+**Hecho**
+
+- **La tabla de supuestos resumen sale del anexo** y se imprime como lámina del
+  cuerpo, **justo antes de las láminas de proyección**, con el titular "Con qué
+  se proyecta cada estrategia". Sigue una tabla por estrategia, lado a lado.
+- `_summary_table` la arma aparte de `_build_annex`; `_topic_page` acepta
+  `eyebrow` y `lede` para servir dentro y fuera del anexo.
+- El anexo renumera solo: asignación, distribución nominal, distribución real y
+  deuda.
+- **172 tests**, todos en verde.
+
+**Decisiones y hallazgos**
+
+- **Los supuestos resumen no son material de consulta, son la clave de lectura
+  de la gráfica siguiente.** Dicen con qué retorno, volatilidad y Sharpe se
+  generó la nube de trayectorias; en el anexo obligaban a irse al final del
+  documento para entender la lámina que se tenía delante. El resto de las tablas
+  sí son consulta y se quedan donde estaban.
+- **La lámina va sin número de tabla.** Numerarla la haría parecer parte del
+  anexo, y nadie la cita: se lee donde está.
+- Reusa `_AnnexTable` aunque ya no sea del anexo. Comparte la maquetación de
+  tema —una tabla por estrategia— y duplicar la estructura para cambiarle el
+  nombre habría sido peor que el préstamo.
+
 ## Sesión 12 — 22 sep 2026
 
 Reorganización del informe: la distribución en las dos unidades, el anexo por

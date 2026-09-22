@@ -18,13 +18,20 @@ caminos, que es lo que permite reproducir la corrida exacta más adelante.
 
 Estructura
 ----------
-Portada · supuestos del caso · gráficas · **anexo**.
+Portada · supuestos del caso · asignación · **supuestos resumen** · proyección ·
+deuda · **anexo**.
 
-**En el cuerpo no va ninguna tabla.** Todas viven en el anexo, y ahí cada
-**tema** ocupa una página con una tabla por estrategia, lado a lado: la
-asignación de A junto a la de B en la misma hoja. Comparar dos estrategias es
-justamente lo que se hace con estas tablas, y repartirlas en hojas distintas
-obligaba a pasar página para comparar dos números que caben juntos.
+**La única tabla del cuerpo son los supuestos resumen**, y va justo antes de las
+láminas de proyección: dice con qué retorno, volatilidad y Sharpe se generó la
+nube de trayectorias que viene a continuación, así que es lo que hay que tener en
+la cabeza al mirarla. En el anexo obligaba a irse al final del documento para
+entender la gráfica que se tenía delante.
+
+El resto de las tablas sí viven en el anexo, y ahí cada **tema** ocupa una página
+con una tabla por estrategia, lado a lado: la asignación de A junto a la de B en
+la misma hoja. Comparar dos estrategias es justamente lo que se hace con estas
+tablas, y repartirlas en hojas distintas obligaba a pasar página para comparar
+dos números que caben juntos.
 
 Cuando las estrategias son tantas que las columnas quedarían ilegibles, el tema
 vuelve a una tabla por página. Es preferible gastar hojas que imprimir algo que
@@ -377,8 +384,9 @@ def _table_pages(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: s
 
 
 def _topic_page(pdf: PdfPages, options: ReportOptions, page_no: int,
-                tabla: "_AnnexTable") -> int:
-    """Un tema del anexo: **una tabla por estrategia**, lado a lado en la hoja.
+                tabla: "_AnnexTable", eyebrow: str = "Anexo",
+                lede: str | None = None) -> int:
+    """Un tema: **una tabla por estrategia**, lado a lado en la hoja.
 
     El cuerpo de letra sale del ancho que le toca a cada columna, no de un valor
     fijo: con dos estrategias las tablas quedan holgadas y con cuatro se aprietan.
@@ -392,6 +400,8 @@ def _topic_page(pdf: PdfPages, options: ReportOptions, page_no: int,
     bloques = tabla.per_strategy
     if not bloques:
         bloques = [("Sin datos", [])]
+    if lede is None:
+        lede = f"Tabla {tabla.number} · {tabla.kind}"
 
     ancho_util = 1 - 2 * MARGIN
     ancho = (ancho_util - TABLE_GAP * (len(bloques) - 1)) / len(bloques)
@@ -401,16 +411,14 @@ def _topic_page(pdf: PdfPages, options: ReportOptions, page_no: int,
     if fontsize < MIN_TABLE_FONTSIZE:
         for nombre, filas in bloques:
             page_no = _table_pages(
-                pdf, options, page_no, "Anexo",
-                f"Tabla {tabla.number} · {tabla.kind} — {nombre}",
+                pdf, options, page_no, eyebrow, f"{lede} — {nombre}",
                 tabla.columns, filas, tabla.footnote,
             )
         return page_no
 
     paginas = max(1, -(-max(len(filas) for _, filas in bloques) // ROWS_PER_PAGE))
     for p in range(paginas):
-        figure = _new_page(pdf, options, "Anexo", page_no)
-        lede = f"Tabla {tabla.number} · {tabla.kind}"
+        figure = _new_page(pdf, options, eyebrow, page_no)
         figure.text(MARGIN, 0.90, lede if p == 0 else f"{lede} (continúa)",
                     color=INK, fontsize=14, fontweight="semibold", va="top")
 
@@ -819,6 +827,36 @@ SUMMARY_INDICATORS = [
 ]
 
 
+def _summary_table(options: ReportOptions, result: SimulationResult,
+                   real: bool, moneda: str) -> _AnnexTable | None:
+    """Los supuestos resumen, que van **en el cuerpo** y no en el anexo.
+
+    Es la única tabla que no es material de consulta: dice con qué retorno,
+    volatilidad y Sharpe se generó la nube de trayectorias, así que se lee justo
+    antes de mirarla. En el anexo obligaba a ir al final del documento para
+    entender la gráfica que se tenía delante.
+
+    Reusa `_AnnexTable` porque comparte maquetación —una tabla por estrategia,
+    lado a lado— pero va sin número: no se cita, se lee donde está.
+    """
+    if not options.include_summary:
+        return None
+    return _AnnexTable(
+        number=0,
+        kind=SUMMARY,
+        columns=["Indicador", "Valor"],
+        per_strategy=[
+            (s.name, [[label, getter(s, real)] for label, getter in SUMMARY_INDICATORS])
+            for s in result.strategies
+        ],
+        footnote=(
+            "El Sharpe usa como tasa libre de riesgo el retorno de la clase de "
+            "caja. Los supuestos resumen explican la proyección; no son una "
+            f"predicción. {moneda}"
+        ),
+    )
+
+
 def _build_annex(
     options: ReportOptions,
     scenario: Scenario,
@@ -872,18 +910,6 @@ def _build_annex(
                 )
                 pendientes.append((kind, DISTRIBUTION_COLUMNS, bloques, nota))
 
-    if options.include_summary:
-        pendientes.append((
-            SUMMARY, ["Indicador", "Valor"],
-            [
-                (s.name, [[label, getter(s, real)] for label, getter in SUMMARY_INDICATORS])
-                for s in result.strategies
-            ],
-            "El Sharpe usa como tasa libre de riesgo el retorno de la clase de "
-            "caja. Los supuestos resumen explican la proyección; no son una "
-            f"predicción. {moneda}",
-        ))
-
     if con_deuda:
         pendientes.append((
             DEBT, ["Indicador", "Valor"],
@@ -933,11 +959,11 @@ def build_report(
 ) -> Path:
     """Escribe el PDF y devuelve la ruta.
 
-    Orden del documento: portada, supuestos del caso y luego las gráficas.
-    **En el cuerpo no va ninguna tabla**: todas viven en el anexo, un tema por
-    hoja con la tabla de cada estrategia al lado de la de las demás, y cada
-    gráfica cita la suya. Así el cuerpo se lee de corrido y el detalle está
-    donde se busca, al final.
+    Orden del documento: portada, supuestos del caso, asignación, supuestos
+    resumen, proyección, deuda y anexo. **La única tabla del cuerpo son los
+    supuestos resumen**, justo antes de la proyección que explican; las demás
+    viven en el anexo, un tema por hoja con la tabla de cada estrategia al lado
+    de la de las demás, y cada gráfica cita la suya.
 
     `settings.show_real_values` sigue decidiendo la unidad de los supuestos
     resumen, pero ya no la de la distribución: esa se imprime en las dos.
@@ -970,6 +996,16 @@ def build_report(
                     "estrategia.",
                 ),
                 rect=ALLOCATION_RECT,
+            )
+
+        # Los supuestos resumen van **antes** de la proyección: dicen con qué
+        # retorno, volatilidad y Sharpe se generó la nube que viene a
+        # continuación, y es lo que hay que tener en la cabeza al mirarla.
+        resumen = _summary_table(options, result, real, moneda)
+        if resumen is not None:
+            page = _topic_page(
+                pdf, options, page, resumen,
+                eyebrow="Supuestos resumen", lede="Con qué se proyecta cada estrategia",
             )
 
         if options.include_distribution:

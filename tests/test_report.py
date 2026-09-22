@@ -151,10 +151,12 @@ def test_el_anexo_trae_un_tema_por_entrada_con_una_tabla_por_estrategia(corrida)
     )
 
     assert [t.number for t in annex] == list(range(1, len(annex) + 1))
-    # Asignacion, distribucion nominal, distribucion real, resumen y deuda.
+    # Asignacion, distribucion nominal, distribucion real y deuda. Los supuestos
+    # resumen NO estan: son la unica tabla que va en el cuerpo.
     assert [t.kind for t in annex] == [
-        ALLOCATION, DISTRIBUTION, DISTRIBUTION_REAL, SUMMARY, DEBT
+        ALLOCATION, DISTRIBUTION, DISTRIBUTION_REAL, DEBT
     ]
+    assert SUMMARY not in {t.kind for t in annex}
     for tabla in annex:
         assert tabla.strategies == nombres, "Un tema no recorre todas las estrategias"
         assert all(filas for _, filas in tabla.per_strategy), "Una tabla salio vacia"
@@ -215,9 +217,9 @@ def test_el_anexo_gasta_una_hoja_por_tema_no_por_estrategia(corrida, tmp_path):
                       include_inputs=False),
         escenario, result, settings,
     )
-    # Portada, grafica de asignacion, y UNA hoja de anexo para las dos
-    # estrategias: antes eran dos.
-    assert _paginas(path) == 3 + 1  # +1: el resumen tambien es un tema
+    # Portada, grafica de asignacion, supuestos resumen (cuerpo) y UNA hoja de
+    # anexo para las dos estrategias: antes eran dos.
+    assert _paginas(path) == 4
 
 
 def test_con_muchas_estrategias_el_tema_vuelve_a_una_tabla_por_hoja(
