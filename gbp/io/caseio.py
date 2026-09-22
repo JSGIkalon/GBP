@@ -15,6 +15,12 @@ rechazarse:
 * **Esquema 2** — cada estrategia lleva los suyos, más un capital inicial propio
   opcional.
 * **Esquema 3** — el caso lleva además los **activos propios** que usa.
+* **Esquema 4** — cada flujo lleva su `basis`: monto fijo o porcentaje del
+  patrimonio. Un caso viejo no trae el campo y se lee como monto fijo, que es lo
+  único que existía. El número sube aunque el caso no use flujos porcentuales
+  porque una versión anterior de la app ignoraría el campo en silencio y
+  simularía un retiro de 4 unidades donde el caso dice 4%; mejor que se niegue a
+  abrirlo y pida actualizar.
 
 Por qué los activos propios sí van en el caso
 ---------------------------------------------
@@ -33,12 +39,12 @@ from copy import deepcopy
 from pathlib import Path
 
 from ..model.allocation import Allocation
-from ..model.cashflows import CashFlow, FlowKind
+from ..model.cashflows import CashFlow, FlowBasis, FlowKind
 from ..model.leverage import Amortization, InterestMode, LoanTerms, RateMode
 from ..model.scenario import Scenario
 from ..model.strategy import Strategy
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 EXTENSION = ".gbp.json"
 
 
@@ -87,6 +93,7 @@ def _flow_to_dict(flow: CashFlow) -> dict:
         "end_year": flow.end_year,
         "inflation_indexed": flow.inflation_indexed,
         "growth": flow.growth,
+        "basis": flow.basis.value,
     }
 
 
@@ -99,6 +106,7 @@ def _flow_from_dict(payload: dict) -> CashFlow:
         end_year=int(payload["end_year"]),
         inflation_indexed=bool(payload.get("inflation_indexed", True)),
         growth=float(payload.get("growth", 0.0)),
+        basis=FlowBasis(payload.get("basis", FlowBasis.AMOUNT.value)),
     )
 
 

@@ -400,12 +400,21 @@ def _inputs_pages(pdf: PdfPages, options: ReportOptions, page_no: int,
 
         if strategy.cashflows:
             for flow in strategy.cashflows:
-                texto = (
-                    f"{flow.kind.value.capitalize()} · {flow.name}: "
-                    f"{format_money(flow.amount)} al año, años {flow.start_year}–{flow.end_year}"
-                    f"{', indexado a inflación' if flow.inflation_indexed else ''}"
-                    f"{f', crecimiento real {flow.growth:.2%}' if flow.growth else ''}"
-                )
+                if flow.is_percentage:
+                    texto = (
+                        f"{flow.kind.value.capitalize()} · {flow.name}: "
+                        f"{flow.amount:.2%} del patrimonio al año, años "
+                        f"{flow.start_year}–{flow.end_year}, recalculado cada año sobre "
+                        "el patrimonio vigente"
+                    )
+                else:
+                    texto = (
+                        f"{flow.kind.value.capitalize()} · {flow.name}: "
+                        f"{format_money(flow.amount)} al año, años "
+                        f"{flow.start_year}–{flow.end_year}"
+                        f"{', indexado a inflación' if flow.inflation_indexed else ''}"
+                        f"{f', crecimiento real {flow.growth:.2%}' if flow.growth else ''}"
+                    )
                 for line in _wrap(texto, 130):
                     figure.text(MARGIN + 0.01, y, line, color=INK, fontsize=8.5)
                     y -= 0.024

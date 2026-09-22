@@ -7,7 +7,13 @@ import pytest
 
 from gbp.engine.montecarlo import simulate
 from gbp.model.allocation import Allocation
-from gbp.model.cashflows import CashFlow, FlowKind
+from gbp.model.cashflows import (
+    CashFlow,
+    FlowBasis,
+    FlowKind,
+    combined_rate_schedule,
+    combined_schedule,
+)
 from gbp.model.scenario import Scenario, SimulationSettings
 from gbp.model.strategy import Strategy
 
@@ -295,3 +301,135 @@ def test_clase_desconocida_se_rechaza(simple_cmas, simple_corr):
     scenario = _scenario(strategies=[_strategy("Rara", {"Cripto": 1.0})])
     with pytest.raises(ValueError, match="Cripto"):
         simulate(scenario, simple_cmas, simple_corr, SimulationSettings(n_paths=100))
+
+
+# ----------------------------------------------------------------------
+# Retiros como porcentaje del patrimonio
+
+
+def _pct(amount: float, **kwargs) -> CashFlow:
+    defaults = dict(
+        name="Retiro variable",
+        kind=FlowKind.OUTFLOW,
+        amount=amount,
+        start_year=1,
+        end_year=10,
+        basis=FlowBasis.PORTFOLIO_PCT,
+    )
+    defaults.update(kwargs)
+    return CashFlow(**defaults)
+
+
+def test_retiro_porcentual_deja_el_patrimonio_en_el_neto_compuesto(
+    deterministic_cmas, deterministic_corr
+):
+    """Retirar 4% tras crecer 5% deja el patrimonio creciendo a 1.05*0.96 por año."""
+    scenario = _scenario(cashflows=[_pct(0.04)])
+    result = simulate(
+        scenario, deterministic_cmas, deterministic_corr, SimulationSettings(n_paths=200, seed=1)
+    )
+    wealth = result.strategies[0].wealth
+    expected = 1_000_000.0 * (1.05 * 0.96) ** np.arange(1, 11)
+    np.testing.assert_allclose(wealth.mean(axis=0), expected, rtol=1e-10)
+
+
+def test_retiro_porcentual_nunca_agota_el_portafolio(simple_cmas, simple_corr):
+    """Un 20% anual castiga el patrimonio pero no lo lleva a cero ni lo cruza."""
+    scenario = _scenario(
+        horizon=30,
+        strategies=[_strategy("Acciones", {"Acciones": 1.0})],
+        cashflows=[_pct(0.20, end_year=30)],
+    )
+    result = simulate(
+        scenario, simple_cmas, simple_corr, SimulationSettings(n_paths=2_000, seed=7)
+    )
+    wealth = result.strategies[0].wealth
+    assert (wealth > 0).all()
+    assert wealth[:, -1].mean() < 1_000_000.0
+
+
+def test_un_retiro_fijo_del_mismo_tamano_si_agota_el_portafolio(simple_cmas, simple_corr):
+    """El contraste que justifica la función: mismo retiro inicial, distinto final."""
+    variable = _strategy(
+        "Variable", {"Acciones": 1.0}, cashflows=[_pct(0.20, end_year=30)]
+    )
+    fijo = _strategy(
+        "Fijo",
+        {"Acciones": 1.0},
+        cashflows=[
+            CashFlow("Retiro fijo", FlowKind.OUTFLOW, 200_000.0, 1, 30, inflation_indexed=False)
+        ],
+    )
+    scenario = _scenario(horizon=30, strategies=[variable, fijo])
+    result = simulate(
+        scenario, simple_cmas, simple_corr, SimulationSettings(n_paths=2_000, seed=7)
+    )
+    var_final, fijo_final = (s.wealth[:, -1] for s in result.strategies)
+    assert (var_final > 0).all()
+    assert (fijo_final <= 0).any()
+
+
+def test_el_porcentaje_se_aplica_sobre_el_patrimonio_neto_de_deuda(
+    deterministic_cmas, deterministic_corr
+):
+    """Con crédito, la base es activos menos deuda, no el activo bruto."""
+    from gbp.model.leverage import LoanTerms
+
+    loan = LoanTerms(principal=500_000.0, rate=0.0, start_year=1, term_years=30)
+    scenario = _scenario(
+        horizon=1,
+        strategies=[_strategy("Apalancada", {"Fijo": 1.0}, cashflows=[_pct(0.10)], loan=loan)],
+    )
+    result = simulate(
+        scenario, deterministic_cmas, deterministic_corr, SimulationSettings(n_paths=100, seed=3)
+    )
+    # Activos: (1,000,000 + 500,000) * 1.05 = 1,575,000; deuda 500,000.
+    # Neto 1,075,000; retiro 10% = 107,500; patrimonio final 967,500.
+    np.testing.assert_allclose(result.strategies[0].wealth[:, 0], 967_500.0, rtol=1e-9)
+
+
+def test_flujo_porcentual_respeta_su_ventana_de_anos(deterministic_cmas, deterministic_corr):
+    """Fuera de start_year..end_year no retira nada."""
+    scenario = _scenario(cashflows=[_pct(0.50, start_year=3, end_year=3)])
+    result = simulate(
+        scenario, deterministic_cmas, deterministic_corr, SimulationSettings(n_paths=100, seed=1)
+    )
+    wealth = result.strategies[0].wealth.mean(axis=0)
+    sin_retiro = 1_000_000.0 * 1.05 ** np.arange(1, 11)
+    np.testing.assert_allclose(wealth[:2], sin_retiro[:2], rtol=1e-10)
+    np.testing.assert_allclose(wealth[2:], sin_retiro[2:] * 0.5, rtol=1e-10)
+
+
+def test_aporte_porcentual_suma_en_vez_de_restar(deterministic_cmas, deterministic_corr):
+    scenario = _scenario(cashflows=[_pct(0.04, kind=FlowKind.INFLOW)])
+    result = simulate(
+        scenario, deterministic_cmas, deterministic_corr, SimulationSettings(n_paths=100, seed=1)
+    )
+    expected = 1_000_000.0 * (1.05 * 1.04) ** np.arange(1, 11)
+    np.testing.assert_allclose(result.strategies[0].wealth.mean(axis=0), expected, rtol=1e-10)
+
+
+def test_un_flujo_porcentual_ignora_inflacion_y_crecimiento_real():
+    """Se normalizan al construir, no se confía en que la UI no los mande."""
+    flow = _pct(0.04, inflation_indexed=True, growth=0.02)
+    assert flow.inflation_indexed is False
+    assert flow.growth == 0.0
+    np.testing.assert_allclose(flow.rate_schedule(3), [-0.04, -0.04, -0.04])
+    np.testing.assert_allclose(flow.schedule(3, 0.025), [0.0, 0.0, 0.0])
+
+
+def test_un_porcentaje_mayor_que_uno_se_rechaza():
+    with pytest.raises(ValueError, match="fracción"):
+        _pct(4.0)
+
+
+def test_los_dos_calendarios_son_excluyentes():
+    """Ningún flujo aporta a schedule y a rate_schedule a la vez."""
+    fijo = CashFlow("Fijo", FlowKind.OUTFLOW, 100.0, 1, 5, inflation_indexed=False)
+    porcentual = _pct(0.04, end_year=5)
+    np.testing.assert_allclose(
+        combined_schedule([fijo, porcentual], 5, 0.0), [-100.0] * 5
+    )
+    np.testing.assert_allclose(
+        combined_rate_schedule([fijo, porcentual], 5), [-0.04] * 5
+    )

@@ -416,6 +416,50 @@ Activos propios: la app deja de servir solo para patrimonios en EE.UU.
   camino es dejar elegir un activo de referencia concreto — la regla está
   aislada en `extend_correlations`, así que no obliga a rehacer nada.
 
+## Sesión 11 — 22 sep 2026
+
+Retiros y aportes como porcentaje del patrimonio.
+
+**Hecho**
+
+- **Nueva base de flujo `% patrimonio`** (`FlowBasis` en `model/cashflows.py`).
+  Un flujo puede seguir siendo un monto fijo en moneda de hoy, o pasar a ser una
+  fracción del patrimonio vigente de cada año, al estilo de la regla del 4% de
+  un endowment. Aplica igual a retiros y a aportes.
+- **El motor lo aplica dentro del bucle**, no en el vector precalculado: un
+  porcentaje no tiene monto hasta que hay un patrimonio sobre el cual calcularlo.
+  `CashFlow` expone dos calendarios excluyentes —`schedule` para montos,
+  `rate_schedule` para fracciones— y el motor suma los dos por separado.
+- Columna **"Base"** en el panel de flujos, con el monto en puntos porcentuales
+  cuando corresponde. Indexación y crecimiento real quedan apagados en esa fila.
+- El informe describe el flujo como "4.00% del patrimonio al año, recalculado
+  cada año" en vez de imprimir el número como si fueran pesos.
+- **Esquema de caso 4**: cada flujo guarda su base. Los casos viejos se leen como
+  monto fijo.
+- **168 tests**, todos en verde.
+
+**Decisiones y hallazgos**
+
+- **La base del porcentaje es el patrimonio neto, no el activo bruto.** Con
+  crédito no coinciden: retirar 4% de 10MM de activos contra 5MM de deuda sería
+  retirar el 8% de lo que el inversionista realmente tiene. Sin crédito los dos
+  son el mismo número, que es el caso normal.
+- **La base se fija antes de aplicar cualquier retiro del año**, para que dos
+  flujos porcentuales del mismo año no dependan del orden en que estén listados.
+- **Un flujo porcentual ignora inflación y crecimiento real, y se normaliza al
+  construirlo.** La fracción se aplica sobre un patrimonio que ya creció;
+  indexarla además a la inflación la contaría dos veces. Se fuerza en
+  `__post_init__` en vez de confiar en que la UI no mande esos campos.
+- **Cambiar la base reinicia el monto en cero.** El número que había era de la
+  otra unidad y ninguna conversión es correcta: 1,100,000 leído como fracción
+  sería 110,000,000% del patrimonio, y 4% leído como monto serían cuatro pesos.
+- **El esquema sube a 4 aunque el caso no use flujos porcentuales.** Una versión
+  anterior de la app ignoraría el campo `basis` en silencio y simularía un retiro
+  de 4 unidades donde el caso dice 4%. Mejor que se niegue a abrirlo.
+- **El total del horizonte no puede incluir los flujos porcentuales**: su monto
+  depende de cada camino simulado. El panel los reporta en una línea aparte en
+  vez de dejar que se lea un total al que le falta media estrategia.
+
 ## Sesión 10 — 21 sep 2026
 
 Reestructuración del informe PDF y retiro del stress test.

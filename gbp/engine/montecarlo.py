@@ -22,12 +22,26 @@ Orden de operaciones dentro de cada año
 2. Aportes.
 3. Retorno de mercado, con rebalanceo anual a los pesos objetivo.
 4. Intereses y amortización del crédito.
-5. Retiros, indexados a la inflación.
+5. Retiros: primero los porcentuales, luego los de monto fijo indexados a la
+   inflación.
 6. Control de LTV y liquidación forzada si aplica.
 
 Si los retiros agotan el portafolio, el saldo queda negativo y a partir de ahí
 devenga a la tasa de caja en vez de al retorno del portafolio: un patrimonio
 agotado es un descubierto, no una posición invertida que siga capitalizando.
+
+Flujos porcentuales
+-------------------
+Un flujo expresado como porcentaje se calcula sobre el **patrimonio neto** del
+año —activos menos deuda— ya crecido y ya servido el crédito. Neto y no bruto
+porque con apalancamiento el activo bruto no es del inversionista: retirar 4%
+de 10MM de activos contra 5MM de deuda sería retirar el 8% de lo que realmente
+tiene. Sin crédito los dos coinciden, que es el caso normal.
+
+La base se fija **antes** de aplicar cualquier retiro del año, así que varios
+flujos porcentuales del mismo año no dependen del orden en que se listen. Un
+patrimonio ya negativo no genera retiro: no se puede sacar un porcentaje de una
+deuda.
 """
 
 from __future__ import annotations
@@ -37,7 +51,7 @@ from collections.abc import Callable
 import numpy as np
 
 from ..model.assets import CMASet
-from ..model.cashflows import CashFlow, FlowKind
+from ..model.cashflows import CashFlow, FlowKind, combined_rate_schedule
 from ..model.correlation import CorrelationMatrix, cholesky_factor, covariance
 from ..model.leverage import LoanSimulator, RateMode
 from ..model.results import SimulationResult, StrategyResult
@@ -118,6 +132,7 @@ def _simulate_strategy(
     cash_rate = np.asarray(cash_growth) - 1.0
 
     inflows, outflows = _flow_schedules(strategy.cashflows, horizon, inflation)
+    flow_rates = combined_rate_schedule(strategy.cashflows, horizon)
 
     loan = strategy.loan
     reference_cash = 0.0
@@ -149,6 +164,10 @@ def _simulate_strategy(
         if ledger is not None:
             rates = _loan_rates(loan, cash_rate, y, n_paths)
             assets -= ledger.accrue_and_amortize(year, rates)
+
+        if flow_rates[y]:
+            net_wealth = assets - ledger.balance if ledger is not None else assets
+            assets += np.maximum(net_wealth, 0.0) * flow_rates[y]
 
         assets -= outflows[y]
 

@@ -431,11 +431,48 @@ def test_se_pueden_agregar_flujos_a_una_estrategia_no_primera(window):
     assert len(panel.current.cashflows) == 2
     assert panel.cashflow_panel.table.rowCount() == 2
 
-    panel.cashflow_panel.table.item(0, 2).setText("1200000")
+    from gbp.ui.panels.cashflow_panel import COL_AMOUNT
+
+    panel.cashflow_panel.table.item(0, COL_AMOUNT).setText("1200000")
     assert panel.current.cashflows[0].amount == pytest.approx(1_200_000)
     # La edicion no debe reconstruir la tabla ni cambiar de estrategia.
     assert panel.cashflow_panel.table.rowCount() == 2
     assert panel.selector.currentIndex() == len(window.scenario.strategies) - 1
+
+
+def test_un_retiro_se_puede_pasar_a_porcentaje_del_patrimonio(window):
+    """Cambiar la base reinterpreta la unidad del monto y apaga la indexacion."""
+    from PySide6.QtCore import Qt
+
+    from gbp.model.cashflows import FlowBasis
+    from gbp.ui.panels.cashflow_panel import COL_AMOUNT, COL_GROWTH, COL_INDEX
+
+    panel = _nueva_estrategia(window)
+    flujos = panel.cashflow_panel
+    flujos._add(FlowKind.OUTFLOW)
+    flujos.table.item(0, COL_AMOUNT).setText("1200000")
+
+    flujos._set_basis(0, FlowBasis.PORTFOLIO_PCT.value)
+    flow = panel.current.cashflows[0]
+    assert flow.basis is FlowBasis.PORTFOLIO_PCT
+    # El monto anterior era de la otra unidad: se reinicia en vez de convertirse.
+    assert flow.amount == 0.0
+    assert flow.inflation_indexed is False
+
+    # Ahora el monto se escribe en puntos porcentuales.
+    flujos.table.item(0, COL_AMOUNT).setText("4")
+    assert panel.current.cashflows[0].amount == pytest.approx(0.04)
+    assert "4.00 %" in flujos.table.item(0, COL_AMOUNT).text()
+
+    # Indexacion y crecimiento real quedan inertes, no editables.
+    assert not (
+        flujos.table.item(0, COL_INDEX).flags() & Qt.ItemFlag.ItemIsUserCheckable
+    )
+    assert flujos.table.item(0, COL_GROWTH).text() == "—"
+
+    # Un porcentaje mayor que 100 se rechaza y la celda se revierte.
+    flujos.table.item(0, COL_AMOUNT).setText("400")
+    assert panel.current.cashflows[0].amount == pytest.approx(0.04)
 
 
 def test_los_supuestos_de_mercado_son_de_solo_lectura(window):
