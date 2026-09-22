@@ -416,6 +416,53 @@ Activos propios: la app deja de servir solo para patrimonios en EE.UU.
   camino es dejar elegir un activo de referencia concreto — la regla está
   aislada en `extend_correlations`, así que no obliga a rehacer nada.
 
+## Sesión 12 — 22 sep 2026
+
+Reorganización del informe: la distribución en las dos unidades, el anexo por
+tema y los supuestos en dos columnas.
+
+**Hecho**
+
+- **La distribución se imprime dos veces**, en valores nominales y en moneda de
+  hoy, como dos láminas seguidas y dos temas del anexo. `show_real_values` ya no
+  decide cuál se ve; sigue mandando en los supuestos resumen.
+- **El anexo pasa de una tabla por hoja a un tema por hoja**, con la tabla de
+  cada estrategia al lado de la de las demás. `_AnnexTable` deja de ser "una
+  tabla de una estrategia" y pasa a ser "un tema con una tabla por estrategia";
+  el número es del tema, así que cada gráfica cita una sola referencia.
+- **`_topic_page`** calcula el cuerpo de letra a partir del ancho que le toca a
+  cada columna, y si el resultado no sería legible reparte el tema en una hoja
+  por estrategia.
+- **Supuestos del caso y activos propios comparten página**, en dos columnas.
+  Nuevo `_ColumnFlow` / `_Column`: un cursor que recorre una lista de regiones
+  `(hoja, x, tope)` y abre hojas nuevas solo cuando se agotan.
+- La nota al pie de una lámina se apila **de abajo hacia arriba** desde una línea
+  base fija, y el rectángulo de los gráficos baja de 0.16 a 0.19.
+- **172 tests**, todos en verde.
+
+**Decisiones y hallazgos**
+
+- **Las dos unidades no son una preferencia, son dos preguntas.** La nominal es
+  la cifra del extracto y la real dice qué podrá comprar; obligar a elegir una en
+  la ventana de exportación escondía la otra.
+- **Los activos propios se escriben antes que los supuestos del caso**, aunque
+  vayan en la columna derecha. Son pocas líneas y de largo conocido, así que
+  dejan medido el hueco que queda libre debajo, y los supuestos —que sí se pasan
+  de largo— continúan ahí. Al revés, la primera versión gastaba una hoja entera
+  para cuatro líneas sueltas.
+- **Una estrategia se mide entera y se pide sitio de una vez.** Partida entre dos
+  columnas, su titular quedaba en una y sus flujos en la otra y no se veía de
+  quién eran los números.
+- **El cuerpo de letra de las tablas sale del ancho disponible**, no de un valor
+  fijo. `COLUMN_INCHES` se calibró contra la columna más ancha que imprime el
+  informe: con 0.62 pulgadas tres estrategias caían al respaldo sin necesidad;
+  con 0.50 entran a ~6.5 pt, y el corte queda en cuatro.
+- **La nota al pie se ancla por abajo.** Escrita hacia abajo desde un tope fijo,
+  la cita al anexo la estiró a dos líneas y la segunda aterrizaba encima de la
+  fecha del pie de página. Se vio renderizando las páginas a PNG, no en los
+  tests: interceptar `PdfPages.savefig` da la figura ya compuesta, así que se
+  revisa el informe a ojo sin agregar un lector de PDF al proyecto.
+
 ## Sesión 11 — 22 sep 2026
 
 Retiros y aportes como porcentaje del patrimonio.

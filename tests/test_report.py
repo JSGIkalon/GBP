@@ -17,7 +17,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from gbp.engine.montecarlo import simulate
 from gbp.io.report import (
     ALLOCATION,
+    DEBT,
     DISTRIBUTION,
+    DISTRIBUTION_REAL,
+    SUMMARY,
     ReportOptions,
     _build_annex,
     _cite,
@@ -131,8 +134,8 @@ def test_un_caso_sin_deuda_omite_la_seccion_de_deuda(
     assert _paginas(sin_deuda) < _paginas(con_deuda)
 
 
-def test_el_anexo_trae_una_tabla_por_estrategia_agrupada_por_tipo(corrida):
-    """Una tabla por estrategia, y los tipos consecutivos.
+def test_el_anexo_trae_un_tema_por_entrada_con_una_tabla_por_estrategia(corrida):
+    """Un numero por tema, y dentro la tabla de cada estrategia.
 
     No se verifica sobre el PDF: matplotlib escribe el texto de pagina como
     subconjuntos de glifos, asi que buscar la palabra "Anexo" en los bytes no
@@ -148,30 +151,45 @@ def test_el_anexo_trae_una_tabla_por_estrategia_agrupada_por_tipo(corrida):
     )
 
     assert [t.number for t in annex] == list(range(1, len(annex) + 1))
-    assert all(t.rows for t in annex), "Una tabla del anexo salio vacia"
-
-    # Cuatro tipos por dos estrategias.
-    assert len(annex) == 4 * len(nombres)
-    # Cada tabla es de UNA estrategia, y cada tipo las recorre todas en orden.
-    for i in range(0, len(annex), len(nombres)):
-        bloque = annex[i:i + len(nombres)]
-        assert len({t.kind for t in bloque}) == 1, "Un tipo quedo partido"
-        assert [t.strategy for t in bloque] == nombres
+    # Asignacion, distribucion nominal, distribucion real, resumen y deuda.
+    assert [t.kind for t in annex] == [
+        ALLOCATION, DISTRIBUTION, DISTRIBUTION_REAL, SUMMARY, DEBT
+    ]
+    for tabla in annex:
+        assert tabla.strategies == nombres, "Un tema no recorre todas las estrategias"
+        assert all(filas for _, filas in tabla.per_strategy), "Una tabla salio vacia"
 
 
-def test_cada_grafica_cita_las_tablas_de_su_tipo(corrida):
-    """Una grafica compara estrategias, asi que remite a todas sus tablas."""
+def test_la_distribucion_sale_en_las_dos_unidades_y_con_cifras_distintas(corrida):
+    """Nominal y moneda de hoy son dos temas, no uno elegido por settings."""
     escenario, result, settings = corrida
     years = settings.milestones_within(escenario.horizon)
 
     annex = _build_annex(
         ReportOptions(), escenario, result, years, False, True, "Valores nominales."
     )
-    numeros = [t.number for t in annex if t.kind == DISTRIBUTION]
-    assert len(numeros) == 2
+    nominal = next(t for t in annex if t.kind == DISTRIBUTION)
+    real = next(t for t in annex if t.kind == DISTRIBUTION_REAL)
 
-    cita = _cite(annex, DISTRIBUTION, "Nota.")
-    assert cita == f"Nota. Detalle en el Anexo · Tablas {numeros[0]} y {numeros[1]}."
+    assert nominal.columns == real.columns
+    assert nominal.strategies == real.strategies
+    # Con inflacion positiva la serie real es estrictamente menor, asi que las
+    # dos tablas no pueden traer las mismas cifras.
+    assert nominal.per_strategy[0][1] != real.per_strategy[0][1]
+
+
+def test_cada_grafica_cita_la_tabla_de_su_tema(corrida):
+    """Un tema ocupa una hoja, asi que la cita es una sola referencia."""
+    escenario, result, settings = corrida
+    years = settings.milestones_within(escenario.horizon)
+
+    annex = _build_annex(
+        ReportOptions(), escenario, result, years, False, True, "Valores nominales."
+    )
+    numero = next(t.number for t in annex if t.kind == DISTRIBUTION)
+    assert _cite(annex, DISTRIBUTION, "Nota.") == (
+        f"Nota. Detalle en el Anexo · Tabla {numero}."
+    )
 
 
 def test_una_seccion_excluida_no_deja_su_tabla_en_el_anexo(corrida):
@@ -184,8 +202,70 @@ def test_una_seccion_excluida_no_deja_su_tabla_en_el_anexo(corrida):
         escenario, result, years, False, False, "Valores nominales.",
     )
     assert {t.kind for t in annex} == {ALLOCATION}
-    assert [t.number for t in annex] == [1, 2]  # renumera, no deja huecos
+    assert [t.number for t in annex] == [1]  # renumera, no deja huecos
     assert _cite(annex, DISTRIBUTION, "Nota.") == "Nota."  # no cita lo que no existe
+
+
+def test_el_anexo_gasta_una_hoja_por_tema_no_por_estrategia(corrida, tmp_path):
+    """Agrupar las tablas de un tema tiene que reducir el numero de paginas."""
+    escenario, result, settings = corrida
+    path = build_report(
+        tmp_path / "agrupado.pdf",
+        ReportOptions(include_distribution=False, include_debt=False,
+                      include_inputs=False),
+        escenario, result, settings,
+    )
+    # Portada, grafica de asignacion, y UNA hoja de anexo para las dos
+    # estrategias: antes eran dos.
+    assert _paginas(path) == 3 + 1  # +1: el resumen tambien es un tema
+
+
+def test_con_muchas_estrategias_el_tema_vuelve_a_una_tabla_por_hoja(
+    escenario, simple_cmas, simple_corr, tmp_path
+):
+    """Seis tablas de ocho columnas lado a lado serian ilegibles."""
+    base = escenario.strategies[0]
+    base.loan = None
+    escenario.strategies = [base.copy(f"Estrategia {i}") for i in range(6)]
+    settings = SimulationSettings(n_paths=200, seed=3, milestone_years=[5, 10, 20])
+    result = simulate(escenario, simple_cmas, simple_corr, settings)
+
+    agrupado = build_report(
+        tmp_path / "seis.pdf",
+        ReportOptions(include_allocation=False, include_summary=False,
+                      include_debt=False, include_inputs=False),
+        escenario, result, settings,
+    )
+    # Portada + dos graficas + seis hojas por cada una de las dos unidades.
+    assert _paginas(agrupado) == 1 + 2 + 12
+
+
+def test_los_supuestos_y_los_activos_propios_comparten_pagina(
+    corrida, simple_cmas, tmp_path
+):
+    """Dos columnas de la misma hoja, no dos hojas."""
+    from gbp.model.assets import AssetClass, CMASet
+
+    escenario, result, settings = corrida
+    propio = AssetClass(
+        "Acciones", compound_return=0.07, volatility=0.16,
+        origin="custom", asset_class="Renta variable", notes="Supuesto interno.",
+    )
+    cmas = CMASet([propio] + [a for a in simple_cmas.assets if a.name != "Acciones"])
+
+    solo_inputs = dict(include_distribution=False, include_summary=False,
+                       include_allocation=False, include_debt=False)
+    sin_propios = build_report(
+        tmp_path / "sin.pdf", ReportOptions(**solo_inputs),
+        escenario, result, settings,
+    )
+    con_propios = build_report(
+        tmp_path / "con.pdf", ReportOptions(cmas=cmas, **solo_inputs),
+        escenario, result, settings,
+    )
+    # Documentar los activos propios no puede costar una hoja mas: van en la
+    # columna derecha de la misma pagina.
+    assert _paginas(con_propios) == _paginas(sin_propios)
 
 
 # --------------------------------------------------------------------------

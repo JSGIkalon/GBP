@@ -20,15 +20,24 @@ Estructura
 ----------
 Portada · supuestos del caso · gráficas · **anexo**.
 
-**En el cuerpo no va ninguna tabla.** Todas viven en el anexo, donde cada una
-es de **una sola estrategia** y están agrupadas por tipo: la asignación de A
-seguida de la de B, luego la distribución de A y la de B, y así. Agrupar por
-tipo y no por estrategia deja comparables las tablas que se leen juntas.
+**En el cuerpo no va ninguna tabla.** Todas viven en el anexo, y ahí cada
+**tema** ocupa una página con una tabla por estrategia, lado a lado: la
+asignación de A junto a la de B en la misma hoja. Comparar dos estrategias es
+justamente lo que se hace con estas tablas, y repartirlas en hojas distintas
+obligaba a pasar página para comparar dos números que caben juntos.
 
-Cada gráfica del cuerpo cita todas las tablas de su tipo —compara estrategias,
-así que su detalle está repartido en tantas tablas como estrategias haya. Los
-números se reservan antes de escribir la primera página, en `_build_annex`,
-porque el PDF se escribe de una sola pasada con `PdfPages`.
+Cuando las estrategias son tantas que las columnas quedarían ilegibles, el tema
+vuelve a una tabla por página. Es preferible gastar hojas que imprimir algo que
+no se puede leer.
+
+Cada gráfica del cuerpo cita la tabla de su tema. Los números se reservan antes
+de escribir la primera página, en `_build_annex`, porque el PDF se escribe de una
+sola pasada con `PdfPages`.
+
+La distribución se imprime **dos veces**: en valores nominales y en moneda de
+hoy. Son la misma proyección contada en dos unidades y las dos hacen falta —la
+nominal es la que verá en su extracto, la real es la que dice qué podrá comprar—
+así que el informe no obliga a elegir una en la ventana de exportación.
 """
 
 from __future__ import annotations
@@ -264,11 +273,18 @@ def _cover(pdf: PdfPages, options: ReportOptions, scenario: Scenario,
     pdf.savefig(figure)
 
 
-CHART_RECT = (0.08, 0.16, 0.86, 0.70)
+# El borde inferior deja sitio para tres cosas apiladas bajo el eje: la nota que
+# el propio gráfico escribe como `xlabel`, la nota al pie de la página —que con
+# la cita al anexo llega a dos líneas— y el pie impreso por `_new_page`.
+CHART_RECT = (0.08, 0.19, 0.86, 0.67)
 # La asignación de activos rotula cada barra con el nombre de su sub-clase
 # —"Emerging Markets Sovereign Debt" y parecidos—, así que necesita un margen
 # izquierdo mucho más ancho o el texto se sale de la hoja.
-ALLOCATION_RECT = (0.26, 0.16, 0.68, 0.70)
+ALLOCATION_RECT = (0.26, 0.19, 0.68, 0.67)
+# Línea base de la nota al pie: el bloque crece hacia **arriba** desde aquí, para
+# que la última línea nunca invada el pie de página por mucho que se alargue.
+FOOTNOTE_BASE = 0.060
+FOOTNOTE_STEP = 0.021
 # Cuánto hay que correr el titular de esa lámina, en fracción del ancho del eje,
 # para que quede alineado con el margen de la página como en el resto.
 ALLOCATION_TITLE_X = (MARGIN - ALLOCATION_RECT[0]) / ALLOCATION_RECT[2]
@@ -290,48 +306,68 @@ def _chart_page(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: st
         # Por **debajo** de la nota que el propio gráfico escribe bajo su eje
         # —el box plot explica ahí sus percentiles—, no encima: a la misma
         # altura las dos líneas quedaban pegadas y con sangrías distintas.
-        for i, line in enumerate(_wrap(footnote, 150)):
-            figure.text(MARGIN, 0.062 - i * 0.021, line, color=INK_SOFT, fontsize=7.5)
+        # Se apila de abajo hacia arriba: escrita hacia abajo desde un tope fijo,
+        # una nota de dos líneas se montaba sobre la fecha del pie de página.
+        lines = _wrap(footnote, 150)
+        for i, line in enumerate(reversed(lines)):
+            figure.text(MARGIN, FOOTNOTE_BASE + i * FOOTNOTE_STEP, line,
+                        color=INK_SOFT, fontsize=7.5)
     pdf.savefig(figure)
     return page_no + 1
 
 
+ROWS_PER_PAGE = 26
+BASE_TABLE_FONTSIZE = 8.0
+# Por debajo de este cuerpo la tabla deja de ser legible impresa, y es preferible
+# gastar una hoja por estrategia antes que apretarlas todas en una ilegible.
+MIN_TABLE_FONTSIZE = 5.5
+# Ancho que necesita una columna de tabla, en pulgadas, al cuerpo base. Medido
+# sobre la columna más ancha que imprime el informe ("Desv. est." con cifras como
+# "111.8MM"), más el aire de la celda. De aquí sale el cuerpo de letra, y con él
+# el punto en que un tema deja de caber en una hoja: tres estrategias entran, y
+# de cuatro en adelante se reparte en una hoja por estrategia.
+COLUMN_INCHES = 0.50
+TABLE_GAP = 0.02
+
+
+def _draw_table(ax, columns: list[str], rows: list[list[str]], fontsize: float):
+    """Estilo de tabla del informe: sin rejilla, regla bajo cada fila."""
+    table = ax.table(cellText=rows, colLabels=columns, loc="upper center", cellLoc="right")
+    table.auto_set_font_size(False)
+    table.set_fontsize(fontsize)
+    table.scale(1, 1.55)
+    for (row, col), cell in table.get_celld().items():
+        cell.visible_edges = "B"
+        cell.set_edgecolor(NEUTRAL)
+        cell.set_linewidth(0.6)
+        if col == 0:
+            cell.set_text_props(ha="left")
+        if row == 0:
+            cell.set_text_props(color=NAVY, fontweight="semibold")
+            cell.set_edgecolor(LEADER)
+            cell.set_linewidth(1.2)
+        else:
+            cell.set_text_props(color=INK)
+    return table
+
+
 def _table_pages(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: str,
                  lede: str, columns: list[str], rows: list[list[str]],
-                 footnote: str = "", rows_per_page: int = 26) -> int:
-    """Tabla paginada. matplotlib no pagina solo, así que se corta a mano."""
+                 footnote: str = "", rows_per_page: int = ROWS_PER_PAGE) -> int:
+    """Una tabla sola, paginada. matplotlib no pagina solo: se corta a mano."""
     if not rows:
         rows = [["Sin datos"] + [""] * (len(columns) - 1)]
 
     chunks = [rows[i:i + rows_per_page] for i in range(0, len(rows), rows_per_page)]
     for i, chunk in enumerate(chunks):
         figure = _new_page(pdf, options, eyebrow, page_no)
-        _add_rule(figure, 0.945)
         title = lede if i == 0 else f"{lede} (continúa)"
         figure.text(MARGIN, 0.90, title, color=INK, fontsize=14,
                     fontweight="semibold", va="top")
 
         ax = figure.add_axes((MARGIN, 0.10, 1 - 2 * MARGIN, 0.76))
         ax.axis("off")
-        table = ax.table(
-            cellText=chunk, colLabels=columns, loc="upper center", cellLoc="right",
-        )
-        table.auto_set_font_size(False)
-        table.set_fontsize(8)
-        table.scale(1, 1.55)
-        for (row, col), cell in table.get_celld().items():
-            cell.set_linewidth(0)
-            cell.visible_edges = "B"
-            cell.set_edgecolor(NEUTRAL)
-            cell.set_linewidth(0.6)
-            if col == 0:
-                cell.set_text_props(ha="left")
-            if row == 0:
-                cell.set_text_props(color=NAVY, fontweight="semibold")
-                cell.set_edgecolor(LEADER)
-                cell.set_linewidth(1.2)
-            else:
-                cell.set_text_props(color=INK)
+        _draw_table(ax, columns, chunk, BASE_TABLE_FONTSIZE)
 
         if footnote:
             figure.text(MARGIN, 0.072, footnote, color=INK_SOFT, fontsize=7.5)
@@ -340,118 +376,377 @@ def _table_pages(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: s
     return page_no
 
 
-def _inputs_pages(pdf: PdfPages, options: ReportOptions, page_no: int,
-                  scenario: Scenario) -> int:
-    """Los inputs del caso, para que el informe sea reproducible sin el .gbp.json."""
-    figure = _new_page(pdf, options, "Supuestos del caso", page_no)
-    figure.text(MARGIN, 0.90, "Con qué se construyó esta proyección",
-                color=INK, fontsize=14, fontweight="semibold", va="top")
+def _topic_page(pdf: PdfPages, options: ReportOptions, page_no: int,
+                tabla: "_AnnexTable") -> int:
+    """Un tema del anexo: **una tabla por estrategia**, lado a lado en la hoja.
 
-    y = 0.83
-    figure.text(MARGIN, y, "ESCENARIO", color=NAVY, fontsize=8.5, fontweight="semibold")
-    y -= 0.035
+    El cuerpo de letra sale del ancho que le toca a cada columna, no de un valor
+    fijo: con dos estrategias las tablas quedan holgadas y con cuatro se aprietan.
+    Si aun así el resultado no sería legible, el tema se reparte en una hoja por
+    estrategia, que es lo que hacía el informe antes.
+
+    Las estrategias más cortas simplemente terminan antes; no se rellenan con
+    filas vacías porque el alto de celda de matplotlib no depende del número de
+    filas, así que las tablas quedan alineadas igual.
+    """
+    bloques = tabla.per_strategy
+    if not bloques:
+        bloques = [("Sin datos", [])]
+
+    ancho_util = 1 - 2 * MARGIN
+    ancho = (ancho_util - TABLE_GAP * (len(bloques) - 1)) / len(bloques)
+    pulgadas_por_columna = ancho / len(tabla.columns) * PAGE_SIZE[0]
+    fontsize = BASE_TABLE_FONTSIZE * min(1.0, pulgadas_por_columna / COLUMN_INCHES)
+
+    if fontsize < MIN_TABLE_FONTSIZE:
+        for nombre, filas in bloques:
+            page_no = _table_pages(
+                pdf, options, page_no, "Anexo",
+                f"Tabla {tabla.number} · {tabla.kind} — {nombre}",
+                tabla.columns, filas, tabla.footnote,
+            )
+        return page_no
+
+    paginas = max(1, -(-max(len(filas) for _, filas in bloques) // ROWS_PER_PAGE))
+    for p in range(paginas):
+        figure = _new_page(pdf, options, "Anexo", page_no)
+        lede = f"Tabla {tabla.number} · {tabla.kind}"
+        figure.text(MARGIN, 0.90, lede if p == 0 else f"{lede} (continúa)",
+                    color=INK, fontsize=14, fontweight="semibold", va="top")
+
+        for i, (nombre, filas) in enumerate(bloques):
+            x = MARGIN + i * (ancho + TABLE_GAP)
+            _swatch(figure, x, 0.845, series_color(i))
+            figure.text(x + 0.016, 0.845, nombre.upper(), color=NAVY, fontsize=8.5,
+                        fontweight="semibold")
+            chunk = filas[p * ROWS_PER_PAGE:(p + 1) * ROWS_PER_PAGE]
+            if not chunk:
+                figure.text(x, 0.80, "Sin datos", color=INK_SOFT, fontsize=8)
+                continue
+            ax = figure.add_axes((x, 0.10, ancho, 0.72))
+            ax.axis("off")
+            _draw_table(ax, tabla.columns, chunk, fontsize)
+
+        if tabla.footnote:
+            figure.text(MARGIN, 0.072, tabla.footnote, color=INK_SOFT, fontsize=7.5)
+        pdf.savefig(figure)
+        page_no += 1
+    return page_no
+
+
+# ----------------------------------------------------------------------
+# Texto en columnas
+#
+# "Con qué se construyó esta proyección" y "Supuestos declarados por el
+# analista" van en la **misma página**, en dos columnas. Son las dos mitades de
+# una sola pregunta —de dónde salen estos números— y separarlas en dos hojas
+# obligaba a pasar página para contestarla entera.
+#
+# Cada columna lleva su propio flujo: si una se pasa de largo, continúa en la
+# columna equivalente de la página siguiente en vez de invadir a su vecina. Por
+# eso las figuras se crean a demanda y se guardan todas al final: la columna
+# izquierda puede necesitar una página más que la derecha, así que las dos tienen
+# que poder seguir escribiendo sobre páginas ya empezadas.
+
+CONTENT_TOP = 0.90
+CONTENT_BOTTOM = 0.10
+COLUMN_LEFT_X = MARGIN
+COLUMN_RIGHT_X = 0.53
+# Ancho de corte del texto. En una columna cabe algo menos de la mitad que a
+# página completa; los dos valores están calibrados por debajo del máximo
+# teórico, porque el ancho real depende del glifo y no del número de caracteres.
+COLUMN_WRAP = 62
+SINGLE_WRAP = 130
+
+
+LINE_STEP = 0.024
+HEADING_STEP = 0.032
+
+
+class _ColumnFlow:
+    """Páginas de texto creadas a demanda y guardadas al final."""
+
+    def __init__(self, pdf: PdfPages, options: ReportOptions, eyebrow: str, page_no: int):
+        self._pdf = pdf
+        self._options = options
+        self._eyebrow = eyebrow
+        self._first_page = page_no
+        self._figures: list[Figure] = []
+
+    def figure(self, index: int) -> Figure:
+        while len(self._figures) <= index:
+            self._figures.append(
+                _new_page(
+                    self._pdf, self._options, self._eyebrow,
+                    self._first_page + len(self._figures),
+                )
+            )
+        return self._figures[index]
+
+    def new_page_index(self) -> int:
+        """Índice de una hoja nueva, más allá de todas las ya empezadas."""
+        index = len(self._figures)
+        self.figure(index)
+        return index
+
+    def flush(self) -> int:
+        """Guarda las páginas en orden y devuelve el número de la siguiente."""
+        self.figure(0)  # una sección vacía sigue mereciendo su hoja
+        for figure in self._figures:
+            self._pdf.savefig(figure)
+        return self._first_page + len(self._figures)
+
+
+class _Column:
+    """Cursor que escribe recorriendo una lista de regiones.
+
+    Una región es un hueco de una página: `(hoja, x, tope)`. Encadenarlas es lo
+    que permite que los supuestos del caso empiecen en la columna izquierda y,
+    cuando se pasan de largo, **sigan en el hueco que dejó libre la columna
+    derecha** en vez de abrir una hoja nueva con cuatro líneas sueltas.
+
+    Agotadas las regiones previstas, se abren hojas nuevas repitiendo `tail`,
+    que es el patrón de columnas de una página en blanco.
+    """
+
+    def __init__(self, flow: _ColumnFlow, wrap: int,
+                 regions: list[tuple[int, float, float]],
+                 tail: list[tuple[float, float]] | None = None):
+        self._flow = flow
+        self.wrap = wrap
+        self._regions = list(regions)
+        self._tail = list(tail) if tail else [(regions[0][1], CONTENT_TOP)]
+        self._index = 0
+        self._tail_page = 0
+        self.page, self.x, self.y = self._regions[0]
+
+    def _advance(self):
+        self._index += 1
+        if self._index < len(self._regions):
+            self.page, self.x, self.y = self._regions[self._index]
+            return
+        k = self._index - len(self._regions)
+        if k % len(self._tail) == 0:
+            self._tail_page = self._flow.new_page_index()
+        self.page = self._tail_page
+        self.x, self.y = self._tail[k % len(self._tail)]
+
+    def _room(self, height: float):
+        """Cambia de región si el bloque no cabe entero.
+
+        Un bloque más alto que una región entera no cabe en ninguna parte:
+        cambiar de región solo lo movería, así que se escribe donde esté.
+        """
+        if height <= CONTENT_TOP - CONTENT_BOTTOM and self.y - height < CONTENT_BOTTOM:
+            self._advance()
+
+    def reserve(self, height: float):
+        """Pide sitio para un bloque que no se debe partir."""
+        self._room(height)
+
+    def title(self, text: str):
+        self._room(0.075)
+        figure = self._flow.figure(self.page)
+        figure.text(self.x, self.y, text, color=INK, fontsize=13,
+                    fontweight="semibold", va="top")
+        self.y -= 0.075
+
+    def heading(self, text: str, swatch: str | None = None, *, auto_break: bool = True):
+        if auto_break:
+            self._room(HEADING_STEP * 2)
+        figure = self._flow.figure(self.page)
+        if swatch is None:
+            figure.text(self.x, self.y, text, color=NAVY, fontsize=8.5,
+                        fontweight="semibold")
+        else:
+            # La viñeta de color es un rectángulo, no un carácter: Jost no trae
+            # el glifo "●" y matplotlib lo dibujaría como un cuadro vacío.
+            _swatch(figure, self.x, self.y, swatch)
+            figure.text(self.x + 0.018, self.y, text, color=NAVY, fontsize=9,
+                        fontweight="semibold")
+        self.y -= HEADING_STEP
+
+    def write(self, text: str, *, color=INK, fontsize: float = 8.5,
+              weight: str = "normal", indent: float = 0.01,
+              step: float = LINE_STEP, auto_break: bool = True,
+              lines: list[str] | None = None):
+        if lines is None:
+            lines = _wrap(text, self.wrap)
+        if auto_break:
+            self._room(len(lines) * step)
+        figure = self._flow.figure(self.page)
+        for line in lines:
+            figure.text(self.x + indent, self.y, line, color=color,
+                        fontsize=fontsize, fontweight=weight)
+            self.y -= step
+
+    def pair(self, label: str, value: str, label_width: float = 0.13):
+        self._room(0.028)
+        figure = self._flow.figure(self.page)
+        figure.text(self.x + 0.01, self.y, label, color=INK_SOFT, fontsize=9)
+        figure.text(self.x + 0.01 + label_width, self.y, value, color=INK, fontsize=9.5)
+        self.y -= 0.028
+
+    def gap(self, height: float = 0.014):
+        self.y -= height
+
+
+def _flow_text(flow) -> str:
+    """Una línea que describe el flujo tal como se configuró."""
+    if flow.is_percentage:
+        return (
+            f"{flow.kind.value.capitalize()} · {flow.name}: "
+            f"{flow.amount:.2%} del patrimonio al año, años "
+            f"{flow.start_year}–{flow.end_year}, recalculado cada año sobre "
+            "el patrimonio vigente"
+        )
+    return (
+        f"{flow.kind.value.capitalize()} · {flow.name}: "
+        f"{format_money(flow.amount)} al año, años "
+        f"{flow.start_year}–{flow.end_year}"
+        f"{', indexado a inflación' if flow.inflation_indexed else ''}"
+        f"{f', crecimiento real {flow.growth:.2%}' if flow.growth else ''}"
+    )
+
+
+def _strategy_paragraphs(strategy, scenario: Scenario,
+                         options: ReportOptions) -> list[tuple[str, dict]]:
+    """Los párrafos de una estrategia, con su estilo, en orden de lectura."""
+    # Primero la lectura agrupada, que es la que se mira en una reunión, y
+    # debajo el detalle por sub-clase, que es el que hace falta para
+    # reproducir el caso.
+    resumen = group_summary(strategy.weights, options.resolver)
+    pesos = " · ".join(
+        f"{name} {weight:.1%}" for name, weight in strategy.weights.items()
+    ) or "sin pesos definidos"
+    capital = (
+        format_money(strategy.initial_value) if strategy.has_own_initial
+        else f"{format_money(scenario.initial_value)} (del escenario)"
+    )
+
+    parrafos: list[tuple[str, dict]] = [
+        (f"Por clase de activo: {resumen}", {"weight": "semibold"}),
+        (f"Detalle por sub-clase: {pesos}", {}),
+        (f"Capital inicial: {capital}", {}),
+    ]
+
+    if strategy.cashflows:
+        parrafos.extend((_flow_text(f), {}) for f in strategy.cashflows)
+    else:
+        parrafos.append(("Sin flujos.", {"color": INK_SOFT}))
+
+    if strategy.has_loan:
+        loan = strategy.loan
+        tasa = (
+            f"tasa fija {loan.rate:.2%}" if loan.rate_mode.value == "fija"
+            else f"caja + {loan.spread:.2%}"
+        )
+        ltv = (
+            f", LTV máx. {loan.max_ltv:.0%} y objetivo {loan.effective_target_ltv:.0%} "
+            "tras la llamada a margen"
+            if loan.max_ltv is not None else ", sin control de LTV"
+        )
+        parrafos.append((
+            f"Crédito · {loan.name}: {format_money(loan.principal)} en el año "
+            f"{loan.start_year}, plazo {loan.term_years} años, {tasa}, intereses "
+            f"{loan.interest_mode.value}, amortización {loan.amortization.value}{ltv}",
+            {},
+        ))
+    else:
+        parrafos.append(("Sin apalancamiento.", {"color": INK_SOFT}))
+
+    return parrafos
+
+
+def _write_case_inputs(col: _Column, scenario: Scenario, options: ReportOptions):
+    """Los inputs del caso, para que el informe sea reproducible sin el .gbp.json."""
+    col.title("Con qué se construyó esta proyección")
+    col.heading("ESCENARIO")
     for label, value in (
         ("Capital inicial", format_money(scenario.initial_value)),
         ("Horizonte", f"{scenario.horizon} años"),
         ("Inflación anual", f"{scenario.inflation:.2%}"),
     ):
-        figure.text(MARGIN + 0.01, y, label, color=INK_SOFT, fontsize=9)
-        figure.text(MARGIN + 0.16, y, value, color=INK, fontsize=9.5)
-        y -= 0.028
+        col.pair(label, value)
 
     for i, strategy in enumerate(scenario.strategies):
-        if y < 0.16:
-            pdf.savefig(figure)
-            page_no += 1
-            figure = _new_page(pdf, options, "Supuestos del caso", page_no)
-            _add_rule(figure, 0.945)
-            y = 0.90
+        # La estrategia se mide entera y se pide sitio de una vez: partida entre
+        # dos columnas, su titular quedaba en una y sus flujos en la otra, y no
+        # se veía de quién eran los números.
+        parrafos = [
+            (_wrap(texto, col.wrap), estilo)
+            for texto, estilo in _strategy_paragraphs(strategy, scenario, options)
+        ]
+        alto = HEADING_STEP + sum(len(lineas) for lineas, _ in parrafos) * LINE_STEP
+        col.gap(0.016)
+        col.reserve(alto)
 
-        y -= 0.03
-        # La viñeta de color es un rectángulo, no un carácter: Jost no trae el
-        # glifo "●" y matplotlib lo dibujaría como un cuadro vacío en el PDF.
-        _swatch(figure, MARGIN, y, series_color(i))
-        figure.text(MARGIN + 0.018, y, strategy.name.upper(), color=NAVY, fontsize=9,
-                    fontweight="semibold")
-        y -= 0.032
+        col.heading(strategy.name.upper(), swatch=series_color(i), auto_break=False)
+        for lineas, estilo in parrafos:
+            col.write("", lines=lineas, auto_break=False, **estilo)
 
-        # Primero la lectura agrupada, que es la que se mira en una reunión, y
-        # debajo el detalle por sub-clase, que es el que hace falta para
-        # reproducir el caso.
-        resumen = group_summary(strategy.weights, options.resolver)
-        for line in _wrap(f"Por clase de activo: {resumen}", 130):
-            figure.text(MARGIN + 0.01, y, line, color=INK, fontsize=8.5,
-                        fontweight="semibold")
-            y -= 0.024
 
-        pesos = " · ".join(
-            f"{name} {weight:.1%}" for name, weight in strategy.weights.items()
-        ) or "sin pesos definidos"
-        for line in _wrap(f"Detalle por sub-clase: {pesos}", 130):
-            figure.text(MARGIN + 0.01, y, line, color=INK, fontsize=8.5)
-            y -= 0.024
+def _write_custom_assets(col: _Column, propios: list):
+    """Activos propios.
 
-        capital = (
-            format_money(strategy.initial_value) if strategy.has_own_initial
-            else f"{format_money(scenario.initial_value)} (del escenario)"
+    No es opcional cuando los hay: un supuesto que fijó el analista y que no
+    está publicado por nadie tiene que quedar escrito en el documento que ve el
+    cliente, o la proyección no se puede auditar.
+    """
+    col.title("Supuestos declarados por el analista")
+    col.write(
+        "Estas clases de activo no están en el LTCMA: sus supuestos los fijó quien "
+        "preparó este informe, y sus correlaciones se derivan del promedio de la "
+        "clase de activo indicada. Los valores están en dólares.",
+        color=INK_SOFT, indent=0.0,
+    )
+    col.gap(0.02)
+    for asset in propios:
+        col.heading(asset.name.upper(), swatch=NAVY)
+        col.write(
+            f"Clase: {asset.asset_class} · retorno compuesto {asset.compound_return:.2%}"
+            f" · volatilidad {asset.volatility:.2%} · yield {asset.yield_:.2%}"
         )
-        figure.text(MARGIN + 0.01, y, f"Capital inicial: {capital}", color=INK, fontsize=8.5)
-        y -= 0.024
+        if asset.notes:
+            col.write(f"Notas: {asset.notes}", color=INK_SOFT)
+        col.gap(0.014)
 
-        if strategy.cashflows:
-            for flow in strategy.cashflows:
-                if flow.is_percentage:
-                    texto = (
-                        f"{flow.kind.value.capitalize()} · {flow.name}: "
-                        f"{flow.amount:.2%} del patrimonio al año, años "
-                        f"{flow.start_year}–{flow.end_year}, recalculado cada año sobre "
-                        "el patrimonio vigente"
-                    )
-                else:
-                    texto = (
-                        f"{flow.kind.value.capitalize()} · {flow.name}: "
-                        f"{format_money(flow.amount)} al año, años "
-                        f"{flow.start_year}–{flow.end_year}"
-                        f"{', indexado a inflación' if flow.inflation_indexed else ''}"
-                        f"{f', crecimiento real {flow.growth:.2%}' if flow.growth else ''}"
-                    )
-                for line in _wrap(texto, 130):
-                    figure.text(MARGIN + 0.01, y, line, color=INK, fontsize=8.5)
-                    y -= 0.024
-        else:
-            figure.text(MARGIN + 0.01, y, "Sin flujos.", color=INK_SOFT, fontsize=8.5)
-            y -= 0.024
 
-        if strategy.has_loan:
-            loan = strategy.loan
-            tasa = (
-                f"tasa fija {loan.rate:.2%}" if loan.rate_mode.value == "fija"
-                else f"caja + {loan.spread:.2%}"
-            )
-            ltv = (
-                f", LTV máx. {loan.max_ltv:.0%} y objetivo {loan.effective_target_ltv:.0%} "
-                "tras la llamada a margen"
-                if loan.max_ltv is not None else ", sin control de LTV"
-            )
-            texto = (
-                f"Crédito · {loan.name}: {format_money(loan.principal)} en el año "
-                f"{loan.start_year}, plazo {loan.term_years} años, {tasa}, intereses "
-                f"{loan.interest_mode.value}, amortización {loan.amortization.value}{ltv}"
-            )
-            for line in _wrap(texto, 130):
-                figure.text(MARGIN + 0.01, y, line, color=INK, fontsize=8.5)
-                y -= 0.024
-        else:
-            figure.text(MARGIN + 0.01, y, "Sin apalancamiento.", color=INK_SOFT, fontsize=8.5)
-            y -= 0.024
+def _inputs_pages(pdf: PdfPages, options: ReportOptions, page_no: int,
+                  scenario: Scenario) -> int:
+    """Supuestos del caso y activos propios, en dos columnas de la misma página.
 
-    pdf.savefig(figure)
-    page_no += 1
-
+    Sin activos propios no hay segunda columna, y el texto usa la página entera:
+    una columna sola de media hoja dejaría la otra mitad en blanco.
+    """
     propios = _custom_used(scenario, options)
-    if propios:
-        page_no = _custom_assets_page(pdf, options, page_no, propios)
-    return page_no
+    flow = _ColumnFlow(pdf, options, "Supuestos del caso", page_no)
+
+    if not propios:
+        _write_case_inputs(
+            _Column(flow, SINGLE_WRAP, [(0, COLUMN_LEFT_X, CONTENT_TOP)]),
+            scenario, options,
+        )
+        return flow.flush()
+
+    # Los activos propios se escriben **primero** aunque vayan a la derecha: son
+    # pocas líneas y de largo conocido, así que dejan medido el hueco que queda
+    # libre bajo ellos, y los supuestos del caso —que sí se pasan de largo—
+    # pueden continuar ahí en vez de abrir otra hoja.
+    derecha = _Column(flow, COLUMN_WRAP, [(0, COLUMN_RIGHT_X, CONTENT_TOP)])
+    _write_custom_assets(derecha, propios)
+
+    regiones = [(0, COLUMN_LEFT_X, CONTENT_TOP)]
+    sobra = derecha.y - 0.03
+    if sobra - CONTENT_BOTTOM > 0.12:  # menos que eso es una tira, no una columna
+        regiones.append((derecha.page, COLUMN_RIGHT_X, sobra))
+
+    _write_case_inputs(
+        _Column(flow, COLUMN_WRAP, regiones,
+                tail=[(COLUMN_LEFT_X, CONTENT_TOP), (COLUMN_RIGHT_X, CONTENT_TOP)]),
+        scenario, options,
+    )
+    return flow.flush()
 
 
 def _custom_used(scenario: Scenario, options: ReportOptions) -> list:
@@ -469,80 +764,41 @@ def _custom_used(scenario: Scenario, options: ReportOptions) -> list:
     return usados
 
 
-def _custom_assets_page(pdf: PdfPages, options: ReportOptions, page_no: int,
-                        propios: list) -> int:
-    """Página de activos propios.
-
-    No es opcional cuando los hay: un supuesto que fijó el analista y que no
-    está publicado por nadie tiene que quedar escrito en el documento que ve el
-    cliente, o la proyección no se puede auditar.
-    """
-    figure = _new_page(pdf, options, "Activos propios", page_no)
-    figure.text(MARGIN, 0.90, "Supuestos declarados por el analista",
-                color=INK, fontsize=14, fontweight="semibold", va="top")
-
-    y = 0.83
-    for line in _wrap(
-        "Estas clases de activo no están en el LTCMA: sus supuestos los fijó quien "
-        "preparó este informe, y sus correlaciones se derivan del promedio de la "
-        "clase de activo indicada. Los valores están en dólares.", 130
-    ):
-        figure.text(MARGIN, y, line, color=INK_SOFT, fontsize=8.5)
-        y -= 0.024
-
-    y -= 0.02
-    for asset in propios:
-        _swatch(figure, MARGIN, y, NAVY)
-        figure.text(MARGIN + 0.018, y, asset.name.upper(), color=NAVY, fontsize=9,
-                    fontweight="semibold")
-        y -= 0.032
-        detalle = (
-            f"Clase: {asset.asset_class} · retorno compuesto {asset.compound_return:.2%}"
-            f" · volatilidad {asset.volatility:.2%} · yield {asset.yield_:.2%}"
-        )
-        for line in _wrap(detalle, 130):
-            figure.text(MARGIN + 0.01, y, line, color=INK, fontsize=8.5)
-            y -= 0.024
-        if asset.notes:
-            for line in _wrap(f"Notas: {asset.notes}", 130):
-                figure.text(MARGIN + 0.01, y, line, color=INK_SOFT, fontsize=8.5)
-                y -= 0.024
-        y -= 0.014
-
-    pdf.savefig(figure)
-    return page_no + 1
-
-
 # ----------------------------------------------------------------------
 @dataclass
 class _AnnexTable:
-    """Una tabla del anexo, ya numerada. **Siempre de una sola estrategia.**
+    """Un **tema** del anexo, ya numerado, con una tabla por estrategia.
 
     El anexo se arma **antes** de escribir ninguna página porque las gráficas
     del cuerpo citan sus números. Sin reservarlos primero habría que escribir el
     PDF en dos pasadas.
 
-    `kind` es lo que permite la cita: una gráfica compara todas las estrategias,
-    así que remite a todas las tablas de su tipo de una vez.
+    El número es del tema, no de cada estrategia: una gráfica compara todas las
+    estrategias y su detalle vive en una sola hoja, así que la cita es una sola
+    referencia.
     """
 
     number: int
     kind: str
-    strategy: str
     columns: list[str]
-    rows: list[list[str]]
+    per_strategy: list[tuple[str, list[list[str]]]]
     footnote: str = ""
 
     @property
     def title(self) -> str:
-        return f"{self.kind} — {self.strategy}"
+        return self.kind
+
+    @property
+    def strategies(self) -> list[str]:
+        return [name for name, _ in self.per_strategy]
 
 
-# Tipos de tabla del anexo, en el orden en que se imprimen. El orden importa:
-# sigue al del cuerpo, así que quien lee una gráfica encuentra sus tablas antes
-# que las de la gráfica siguiente.
+# Temas del anexo, en el orden en que se imprimen. El orden importa: sigue al
+# del cuerpo, así que quien lee una gráfica encuentra su tabla antes que la de
+# la gráfica siguiente.
 ALLOCATION = "Asignación de activos"
-DISTRIBUTION = "Patrimonio neto proyectado"
+DISTRIBUTION = "Patrimonio neto proyectado · valores nominales"
+DISTRIBUTION_REAL = "Patrimonio neto proyectado · moneda de hoy"
 SUMMARY = "Supuestos resumen"
 DEBT = "Llamadas a margen y liquidación forzada"
 
@@ -572,15 +828,12 @@ def _build_annex(
     con_deuda: bool,
     moneda: str,
 ) -> list[_AnnexTable]:
-    """Las tablas del anexo: una por estrategia, agrupadas por tipo.
+    """Las tablas del anexo: un tema por entrada, con una tabla por estrategia.
 
-    Agrupar por tipo y no por estrategia deja las tablas comparables una al lado
-    de la otra —la distribución de A seguida de la de B— que es cómo se leen.
-
-    Solo entra la tabla de una sección que el usuario haya pedido: un anexo con
+    Solo entra el tema de una sección que el usuario haya pedido: un anexo con
     el detalle de una gráfica que no está en el documento no lo entendería nadie.
     """
-    pendientes: list[tuple[str, str, list[str], list[list[str]], str]] = []
+    pendientes: list[tuple[str, list[str], list[tuple[str, list[list[str]]]], str]] = []
 
     if options.include_allocation:
         columnas = ["Clase de activo", "Sub-clase", "Peso"]
@@ -589,76 +842,86 @@ def _build_annex(
             filas_por_estrategia.setdefault(row["Estrategia"], []).append(
                 [row[c] for c in columnas]
             )
-        for strategy in scenario.strategies:
-            filas = filas_por_estrategia.get(strategy.name)
-            if filas:
-                pendientes.append((
-                    ALLOCATION, strategy.name, columnas, filas,
-                    "Pesos normalizados sobre el total cargado de la estrategia.",
-                ))
+        bloques = [
+            (s.name, filas_por_estrategia[s.name])
+            for s in scenario.strategies if filas_por_estrategia.get(s.name)
+        ]
+        if bloques:
+            pendientes.append((
+                ALLOCATION, columnas, bloques,
+                "Pesos normalizados sobre el total cargado de cada estrategia.",
+            ))
 
     if options.include_distribution:
-        todas = distribution_table_rows(result, years, real)
-        for strategy in result.strategies:
-            filas = [
-                [str(row[c]) for c in DISTRIBUTION_COLUMNS]
-                for row in todas if row["Estrategia"] == strategy.name
-            ]
-            if filas:
-                pendientes.append(
-                    (DISTRIBUTION, strategy.name, DISTRIBUTION_COLUMNS, filas, moneda)
+        # Las dos unidades, siempre: la nominal es la que verá en su extracto y
+        # la real es la que dice qué podrá comprar. Elegir una escondía la otra.
+        for kind, es_real in ((DISTRIBUTION, False), (DISTRIBUTION_REAL, True)):
+            todas = distribution_table_rows(result, years, es_real)
+            bloques = []
+            for strategy in result.strategies:
+                filas = [
+                    [str(row[c]) for c in DISTRIBUTION_COLUMNS]
+                    for row in todas if row["Estrategia"] == strategy.name
+                ]
+                if filas:
+                    bloques.append((strategy.name, filas))
+            if bloques:
+                nota = (
+                    "Valores en moneda de hoy, descontados a la inflación del escenario."
+                    if es_real else "Valores nominales."
                 )
+                pendientes.append((kind, DISTRIBUTION_COLUMNS, bloques, nota))
 
     if options.include_summary:
-        for strategy in result.strategies:
-            pendientes.append((
-                SUMMARY, strategy.name, ["Indicador", "Valor"],
-                [[label, getter(strategy, real)] for label, getter in SUMMARY_INDICATORS],
-                "El Sharpe usa como tasa libre de riesgo el retorno de la clase de "
-                "caja. Los supuestos resumen explican la proyección; no son una "
-                "predicción.",
-            ))
+        pendientes.append((
+            SUMMARY, ["Indicador", "Valor"],
+            [
+                (s.name, [[label, getter(s, real)] for label, getter in SUMMARY_INDICATORS])
+                for s in result.strategies
+            ],
+            "El Sharpe usa como tasa libre de riesgo el retorno de la clase de "
+            "caja. Los supuestos resumen explican la proyección; no son una "
+            f"predicción. {moneda}",
+        ))
 
     if con_deuda:
-        for strategy in result.strategies:
-            pendientes.append((
-                DEBT, strategy.name, ["Indicador", "Valor"],
-                [
-                    ["Probabilidad de llamada a margen",
-                     f"{strategy.margin_call_probability:.1%}"],
-                    ["Llamadas promedio por camino",
-                     f"{strategy.margin_calls.mean():.2f}"
-                     if strategy.margin_calls.size else "0.00"],
-                    ["Liquidación forzada máxima",
-                     format_money(float(strategy.forced_sales.max()))
-                     if strategy.forced_sales.size else "0"],
-                ],
-                "",
-            ))
+        pendientes.append((
+            DEBT, ["Indicador", "Valor"],
+            [
+                (
+                    s.name,
+                    [
+                        ["Probabilidad de llamada a margen",
+                         f"{s.margin_call_probability:.1%}"],
+                        ["Llamadas promedio por camino",
+                         f"{s.margin_calls.mean():.2f}" if s.margin_calls.size else "0.00"],
+                        ["Liquidación forzada máxima",
+                         format_money(float(s.forced_sales.max()))
+                         if s.forced_sales.size else "0"],
+                    ],
+                )
+                for s in result.strategies
+            ],
+            "",
+        ))
 
     return [
-        _AnnexTable(number=i, kind=kind, strategy=nombre, columns=columnas,
-                    rows=filas, footnote=nota)
-        for i, (kind, nombre, columnas, filas, nota) in enumerate(pendientes, start=1)
+        _AnnexTable(number=i, kind=kind, columns=columnas, per_strategy=bloques,
+                    footnote=nota)
+        for i, (kind, columnas, bloques, nota) in enumerate(pendientes, start=1)
     ]
 
 
 def _cite(annex: list[_AnnexTable], kind: str, extra: str = "") -> str:
-    """Remite a todas las tablas del anexo de un tipo.
+    """Remite a la tabla del anexo de un tema.
 
-    Una gráfica compara las estrategias entre sí, así que su detalle está
-    repartido en tantas tablas como estrategias haya.
+    Un tema ocupa una sola hoja, con la tabla de cada estrategia al lado de la
+    de las demás, así que la cita es una referencia y no una lista.
     """
     numeros = [t.number for t in annex if t.kind == kind]
     if not numeros:
         return extra
-    if len(numeros) == 1:
-        referencia = f"Tabla {numeros[0]}"
-    elif len(numeros) == 2:
-        referencia = f"Tablas {numeros[0]} y {numeros[1]}"
-    else:
-        referencia = f"Tablas {numeros[0]} a {numeros[-1]}"
-    return f"{extra} Detalle en el Anexo · {referencia}.".strip()
+    return f"{extra} Detalle en el Anexo · Tabla {numeros[0]}.".strip()
 
 
 def build_report(
@@ -671,9 +934,13 @@ def build_report(
     """Escribe el PDF y devuelve la ruta.
 
     Orden del documento: portada, supuestos del caso y luego las gráficas.
-    **En el cuerpo no va ninguna tabla**: todas viven en el anexo, una por
-    estrategia y agrupadas por tipo, y cada gráfica cita las suyas. Así el
-    cuerpo se lee de corrido y el detalle está donde se busca, al final.
+    **En el cuerpo no va ninguna tabla**: todas viven en el anexo, un tema por
+    hoja con la tabla de cada estrategia al lado de la de las demás, y cada
+    gráfica cita la suya. Así el cuerpo se lee de corrido y el detalle está
+    donde se busca, al final.
+
+    `settings.show_real_values` sigue decidiendo la unidad de los supuestos
+    resumen, pero ya no la de la distribución: esa se imprime en las dos.
     """
     apply_matplotlib_style()
     path = Path(path)
@@ -706,15 +973,24 @@ def build_report(
             )
 
         if options.include_distribution:
-            page = _chart_page(
-                pdf, options, page, "Distribución",
-                lambda canvas: draw_box_chart(canvas, result, years, real),
-                _cite(
-                    annex, DISTRIBUTION,
-                    "Percentiles calculados sobre los caminos simulados, sin suponer "
-                    f"forma de distribución. {moneda}",
-                ),
-            )
+            # La misma gráfica dos veces, en las dos unidades. Van seguidas y no
+            # en extremos del documento: la comparación entre nominal y real es
+            # justo lo que hay que poder hacer de un vistazo.
+            for kind, es_real in ((DISTRIBUTION, False), (DISTRIBUTION_REAL, True)):
+                unidad = (
+                    "Valores en moneda de hoy, descontados a la inflación del escenario."
+                    if es_real else "Valores nominales."
+                )
+                page = _chart_page(
+                    pdf, options, page,
+                    f"Distribución · {'moneda de hoy' if es_real else 'nominal'}",
+                    lambda canvas, r=es_real: draw_box_chart(canvas, result, years, r),
+                    _cite(
+                        annex, kind,
+                        "Percentiles calculados sobre los caminos simulados, sin "
+                        f"suponer forma de distribución. {unidad}",
+                    ),
+                )
 
         if con_deuda:
             page = _chart_page(
@@ -727,11 +1003,7 @@ def build_report(
             )
 
         for tabla in annex:
-            page = _table_pages(
-                pdf, options, page, "Anexo",
-                f"Tabla {tabla.number} · {tabla.title}",
-                tabla.columns, tabla.rows, tabla.footnote,
-            )
+            page = _topic_page(pdf, options, page, tabla)
 
         info = pdf.infodict()
         info["Title"] = options.title
