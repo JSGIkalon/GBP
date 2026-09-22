@@ -16,11 +16,16 @@ from .strategy import Strategy
 
 @dataclass
 class SimulationSettings:
-    """Configuración general de la app (no del caso del cliente)."""
+    """Configuración general de la app (no del caso del cliente).
+
+    La unidad de los resultados —nominal o moneda de hoy— **no se configura**:
+    las dos se muestran siempre, cada una en su pestaña y cada una en su lámina
+    del informe. Eran la misma proyección contada de dos maneras y las dos hacen
+    falta, así que elegir una escondía la otra.
+    """
 
     n_paths: int = 10_000
     seed: int | None = 42
-    show_real_values: bool = False
     milestone_years: list[int] = field(default_factory=lambda: [5, 10, 15, 20])
 
     def __post_init__(self) -> None:

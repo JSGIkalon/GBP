@@ -205,7 +205,6 @@ def load_settings() -> SimulationSettings:
         return SimulationSettings(
             n_paths=int(payload.get("n_paths", defaults.n_paths)),
             seed=payload.get("seed", defaults.seed),
-            show_real_values=bool(payload.get("show_real_values", False)),
             milestone_years=milestones,
         )
     except (TypeError, ValueError):

@@ -20,10 +20,12 @@ from gbp.io.report import (
     DEBT,
     DISTRIBUTION,
     DISTRIBUTION_REAL,
+    FLOWS,
     SUMMARY,
     ReportOptions,
     _build_annex,
     _cite,
+    _flows_table,
     build_report,
 )
 from gbp.model.allocation import Allocation
@@ -96,7 +98,7 @@ def test_las_secciones_desmarcadas_no_salen(corrida, tmp_path):
         tmp_path / "minimo.pdf",
         ReportOptions(include_distribution=False, include_summary=False,
                       include_allocation=False, include_debt=False,
-                      include_inputs=False),
+                      include_inputs=False, include_flows=False),
         escenario, result, settings,
     )
     assert _paginas(minimo) == 1  # solo la portada
@@ -134,8 +136,8 @@ def test_un_caso_sin_deuda_omite_la_seccion_de_deuda(
     assert _paginas(sin_deuda) < _paginas(con_deuda)
 
 
-def test_el_anexo_trae_un_tema_por_entrada_con_una_tabla_por_estrategia(corrida):
-    """Un numero por tema, y dentro la tabla de cada estrategia.
+def test_el_anexo_trae_una_hoja_por_estrategia_con_todas_sus_tablas(corrida):
+    """Una entrada por estrategia, y dentro todas sus tablas.
 
     No se verifica sobre el PDF: matplotlib escribe el texto de pagina como
     subconjuntos de glifos, asi que buscar la palabra "Anexo" en los bytes no
@@ -146,51 +148,44 @@ def test_el_anexo_trae_un_tema_por_entrada_con_una_tabla_por_estrategia(corrida)
     years = settings.milestones_within(escenario.horizon)
     nombres = [s.name for s in escenario.strategies]
 
-    annex = _build_annex(
-        ReportOptions(), escenario, result, years, False, True, "Valores nominales."
-    )
+    annex = _build_annex(ReportOptions(), escenario, result, years, True)
 
-    assert [t.number for t in annex] == list(range(1, len(annex) + 1))
-    # Asignacion, distribucion nominal, distribucion real y deuda. Los supuestos
-    # resumen NO estan: son la unica tabla que va en el cuerpo.
-    assert [t.kind for t in annex] == [
-        ALLOCATION, DISTRIBUTION, DISTRIBUTION_REAL, DEBT
-    ]
-    assert SUMMARY not in {t.kind for t in annex}
-    for tabla in annex:
-        assert tabla.strategies == nombres, "Un tema no recorre todas las estrategias"
-        assert all(filas for _, filas in tabla.per_strategy), "Una tabla salio vacia"
+    assert [a.name for a in annex] == nombres
+    assert [a.number for a in annex] == list(range(1, len(annex) + 1))
+    for anexo in annex:
+        # Asignacion, distribucion nominal, distribucion real y deuda, todas en
+        # la misma hoja. Los supuestos resumen NO estan: son la unica tabla que
+        # va en el cuerpo.
+        assert [b.kind for b in anexo.blocks] == [
+            ALLOCATION, DISTRIBUTION, DISTRIBUTION_REAL, DEBT
+        ]
+        assert all(b.rows for b in anexo.blocks), "Una tabla salio vacia"
+        assert anexo.block(SUMMARY) is None
 
 
 def test_la_distribucion_sale_en_las_dos_unidades_y_con_cifras_distintas(corrida):
-    """Nominal y moneda de hoy son dos temas, no uno elegido por settings."""
+    """Nominal y moneda de hoy son dos tablas, no una elegida por settings."""
     escenario, result, settings = corrida
     years = settings.milestones_within(escenario.horizon)
 
-    annex = _build_annex(
-        ReportOptions(), escenario, result, years, False, True, "Valores nominales."
-    )
-    nominal = next(t for t in annex if t.kind == DISTRIBUTION)
-    real = next(t for t in annex if t.kind == DISTRIBUTION_REAL)
+    anexo = _build_annex(ReportOptions(), escenario, result, years, True)[0]
+    nominal = anexo.block(DISTRIBUTION)
+    real = anexo.block(DISTRIBUTION_REAL)
 
     assert nominal.columns == real.columns
-    assert nominal.strategies == real.strategies
     # Con inflacion positiva la serie real es estrictamente menor, asi que las
     # dos tablas no pueden traer las mismas cifras.
-    assert nominal.per_strategy[0][1] != real.per_strategy[0][1]
+    assert nominal.rows != real.rows
 
 
-def test_cada_grafica_cita_la_tabla_de_su_tema(corrida):
-    """Un tema ocupa una hoja, asi que la cita es una sola referencia."""
+def test_cada_grafica_cita_las_hojas_de_su_tema(corrida):
+    """El anexo va por estrategia, asi que la cita es el rango de hojas."""
     escenario, result, settings = corrida
     years = settings.milestones_within(escenario.horizon)
 
-    annex = _build_annex(
-        ReportOptions(), escenario, result, years, False, True, "Valores nominales."
-    )
-    numero = next(t.number for t in annex if t.kind == DISTRIBUTION)
+    annex = _build_annex(ReportOptions(), escenario, result, years, True)
     assert _cite(annex, DISTRIBUTION, "Nota.") == (
-        f"Nota. Detalle en el Anexo · Tabla {numero}."
+        f"Nota. Detalle en el Anexo · Hojas {annex[0].number} a {annex[-1].number}."
     )
 
 
@@ -201,31 +196,30 @@ def test_una_seccion_excluida_no_deja_su_tabla_en_el_anexo(corrida):
 
     annex = _build_annex(
         ReportOptions(include_distribution=False, include_summary=False),
-        escenario, result, years, False, False, "Valores nominales.",
+        escenario, result, years, False,
     )
-    assert {t.kind for t in annex} == {ALLOCATION}
-    assert [t.number for t in annex] == [1]  # renumera, no deja huecos
+    assert {b.kind for a in annex for b in a.blocks} == {ALLOCATION}
     assert _cite(annex, DISTRIBUTION, "Nota.") == "Nota."  # no cita lo que no existe
 
 
-def test_el_anexo_gasta_una_hoja_por_tema_no_por_estrategia(corrida, tmp_path):
-    """Agrupar las tablas de un tema tiene que reducir el numero de paginas."""
+def test_el_anexo_gasta_una_hoja_por_estrategia(corrida, tmp_path):
+    """Toda la informacion de una estrategia tiene que caber en una hoja."""
     escenario, result, settings = corrida
     path = build_report(
         tmp_path / "agrupado.pdf",
-        ReportOptions(include_distribution=False, include_debt=False,
-                      include_inputs=False),
+        ReportOptions(include_debt=False, include_inputs=False,
+                      include_flows=False),
         escenario, result, settings,
     )
-    # Portada, grafica de asignacion, supuestos resumen (cuerpo) y UNA hoja de
-    # anexo para las dos estrategias: antes eran dos.
-    assert _paginas(path) == 4
+    # Portada, grafica de asignacion, supuestos resumen (cuerpo), las dos
+    # laminas de distribucion y UNA hoja de anexo por cada estrategia.
+    assert _paginas(path) == 1 + 1 + 1 + 2 + len(escenario.strategies)
 
 
-def test_con_muchas_estrategias_el_tema_vuelve_a_una_tabla_por_hoja(
+def test_con_muchas_estrategias_el_anexo_gasta_una_hoja_cada_una(
     escenario, simple_cmas, simple_corr, tmp_path
 ):
-    """Seis tablas de ocho columnas lado a lado serian ilegibles."""
+    """Seis estrategias son seis hojas, no doce: una por estrategia, no por tema."""
     base = escenario.strategies[0]
     base.loan = None
     escenario.strategies = [base.copy(f"Estrategia {i}") for i in range(6)]
@@ -235,11 +229,39 @@ def test_con_muchas_estrategias_el_tema_vuelve_a_una_tabla_por_hoja(
     agrupado = build_report(
         tmp_path / "seis.pdf",
         ReportOptions(include_allocation=False, include_summary=False,
-                      include_debt=False, include_inputs=False),
+                      include_debt=False, include_inputs=False,
+                      include_flows=False),
         escenario, result, settings,
     )
-    # Portada + dos graficas + seis hojas por cada una de las dos unidades.
-    assert _paginas(agrupado) == 1 + 2 + 12
+    # Portada + dos graficas + una hoja de anexo por estrategia, con las dos
+    # unidades lado a lado dentro de cada hoja.
+    assert _paginas(agrupado) == 1 + 2 + 6
+
+
+def test_el_anexo_de_flujos_trae_la_serie_ano_por_ano(corrida):
+    """La unica forma de comprobar que un flujo indexado crece como se esperaba."""
+    escenario, result, settings = corrida
+    tabla = _flows_table(result, 3)
+
+    assert tabla is not None
+    assert tabla.kind == FLOWS
+    assert tabla.number == 3
+    # Solo la estrategia con flujos: la otra no tiene serie que mostrar.
+    assert tabla.strategies == ["Sin deuda"]
+    filas = tabla.per_strategy[0][1]
+    assert len(filas) == escenario.horizon
+    assert [f[0] for f in filas] == [str(y) for y in range(1, escenario.horizon + 1)]
+
+
+def test_el_retiro_indexado_crece_con_la_inflacion(corrida):
+    """El retiro de 800k del año 1 tiene que valer 800k·1.025^y en el año y."""
+    escenario, result, _ = corrida
+    serie = result.by_name("Sin deuda").flow_history()
+
+    for year in (1, 10, 20):
+        esperado = 800_000.0 * 1.025 ** year
+        assert serie["retiros"][year - 1] == pytest.approx(esperado)
+    assert not serie["aportes"].any()
 
 
 def test_los_supuestos_y_los_activos_propios_comparten_pagina(

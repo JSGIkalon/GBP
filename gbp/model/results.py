@@ -38,6 +38,13 @@ class StrategyResult:
     margin_calls: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=int))
     forced_sales: np.ndarray = field(default_factory=lambda: np.zeros(0))
     inflation_factors: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    # Flujos **realizados** año por año, en magnitudes positivas y forma
+    # `(n_paths, horizon)`. Los de monto fijo son iguales en todos los caminos;
+    # los porcentuales no, porque dependen del patrimonio de cada camino, y por
+    # eso se guardan por camino y no como un vector.
+    contributions: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    withdrawals: np.ndarray = field(default_factory=lambda: np.zeros(0))
+    initial_value: float = 0.0
 
     @property
     def n_paths(self) -> int:
@@ -104,6 +111,48 @@ class StrategyResult:
 
     def terminal_values(self, real: bool = False) -> np.ndarray:
         return self.values(real)[:, -1]
+
+    def last_year_change(self, real: bool = False) -> float:
+        """Variación mediana del patrimonio neto en el **último año proyectado**.
+
+        No es la rentabilidad del portafolio: es el cambio del patrimonio, que
+        incluye aportes, retiros y servicio de la deuda. Un portafolio que rinde
+        5% mientras se le retira el 6% cae, y esa es justamente la cifra que hace
+        falta para saber si el plan todavía se sostiene al final del horizonte.
+
+        Se mide sobre los caminos en que el patrimonio del año anterior era
+        positivo: de un patrimonio agotado no hay variación porcentual que
+        signifique nada.
+        """
+        values = self.values(real)
+        if self.horizon >= 2:
+            previous = values[:, -2]
+        else:
+            factor = self.inflation_factors[0] if (real and self.inflation_factors.size) else 1.0
+            previous = np.full(self.n_paths, self.initial_value / factor)
+        alive = previous > 0
+        if not alive.any():
+            return float("nan")
+        return float(np.median(values[alive, -1] / previous[alive] - 1.0))
+
+    def flow_history(self, real: bool = False) -> dict[str, np.ndarray]:
+        """Aportes y retiros medianos por año, alineados a `1..horizon`.
+
+        La mediana y no el promedio porque un flujo porcentual tiene cola: el
+        promedio lo sube un puñado de caminos muy ricos y dejaría de parecerse
+        al retiro que se ve en un año corriente.
+        """
+        horizon = self.horizon
+        if self.contributions.size == 0:
+            aportes = np.zeros(horizon)
+            retiros = np.zeros(horizon)
+        else:
+            aportes = np.median(self.contributions, axis=0)
+            retiros = np.median(self.withdrawals, axis=0)
+        if real and self.inflation_factors.size:
+            aportes = aportes / self.inflation_factors
+            retiros = retiros / self.inflation_factors
+        return {"aportes": aportes, "retiros": retiros, "neto": aportes - retiros}
 
 
 @dataclass

@@ -1,4 +1,4 @@
-"""Panel de configuración general de la app (no del caso)."""
+﻿"""Panel de configuración general de la app (no del caso)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,11 @@ from ...model.scenario import SimulationSettings
 
 
 class SettingsPanel(QWidget):
-    """Número de simulaciones, semilla, vista y años hito."""
+    """Número de simulaciones, semilla y años hito.
+
+    La unidad de los resultados ya no se configura aquí: nominal y moneda de hoy
+    son dos pestañas de resultados, no una opción.
+    """
 
     changed = Signal()
 
@@ -64,10 +68,6 @@ class SettingsPanel(QWidget):
         self.seed.valueChanged.connect(self._on_change)
         form.addRow("Semilla", self.seed)
 
-        self.show_real = QCheckBox("Mostrar los resultados en poder adquisitivo de hoy")
-        self.show_real.stateChanged.connect(self._on_change)
-        form.addRow("", self.show_real)
-
         self.milestones = QLineEdit()
         self.milestones.setPlaceholderText("5, 10, 15, 20, 25, 30")
         self.milestones.editingFinished.connect(self._on_change)
@@ -110,7 +110,6 @@ class SettingsPanel(QWidget):
         self.use_seed.setChecked(settings.seed is not None)
         self.seed.setValue(settings.seed if settings.seed is not None else 42)
         self.seed.setEnabled(settings.seed is not None)
-        self.show_real.setChecked(settings.show_real_values)
         self.milestones.setText(", ".join(str(y) for y in settings.milestone_years))
         self._loading = False
         self.path_label.setText(f"Se guarda en {library.settings_path()}")
@@ -136,7 +135,6 @@ class SettingsPanel(QWidget):
         self.seed.setEnabled(self.use_seed.isChecked())
         self.settings.n_paths = self.n_paths.value()
         self.settings.seed = self.seed.value() if self.use_seed.isChecked() else None
-        self.settings.show_real_values = self.show_real.isChecked()
         self.settings.milestone_years = self._parse_milestones()
         library.save_settings(self.settings)
         self.changed.emit()
@@ -145,7 +143,6 @@ class SettingsPanel(QWidget):
         defaults = SimulationSettings()
         self.settings.n_paths = defaults.n_paths
         self.settings.seed = defaults.seed
-        self.settings.show_real_values = defaults.show_real_values
         self.settings.milestone_years = list(defaults.milestone_years)
         library.save_settings(self.settings)
         self.reload(self.settings)

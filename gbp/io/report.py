@@ -27,17 +27,18 @@ nube de trayectorias que viene a continuación, así que es lo que hay que tener
 la cabeza al mirarla. En el anexo obligaba a irse al final del documento para
 entender la gráfica que se tenía delante.
 
-El resto de las tablas sí viven en el anexo, y ahí cada **tema** ocupa una página
-con una tabla por estrategia, lado a lado: la asignación de A junto a la de B en
-la misma hoja. Comparar dos estrategias es justamente lo que se hace con estas
-tablas, y repartirlas en hojas distintas obligaba a pasar página para comparar
-dos números que caben juntos.
+El resto de las tablas sí viven en el anexo, y ahí **cada estrategia ocupa una
+hoja**: su asignación, su proyección en las dos unidades y su deuda, repartidas
+en una retícula de dos columnas. La ficha completa de una estrategia es una sola
+página que se puede arrancar y entregar; por tema, había que recorrer el anexo
+entero para armarla.
 
-Cuando las estrategias son tantas que las columnas quedarían ilegibles, el tema
-vuelve a una tabla por página. Es preferible gastar hojas que imprimir algo que
-no se puede leer.
+Detrás de esas hojas va una más con los **ingresos y retiros año por año**, una
+tabla por estrategia. No cabe en la retícula porque tiene una fila por año del
+horizonte, y hace falta para comprobar que un flujo indexado crece como se
+esperaba y que uno porcentual se recalcula sobre el patrimonio vigente.
 
-Cada gráfica del cuerpo cita la tabla de su tema. Los números se reservan antes
+Cada gráfica del cuerpo cita las hojas de su tema. Los números se reservan antes
 de escribir la primera página, en `_build_annex`, porque el PDF se escribe de una
 sola pasada con `PdfPages`.
 
@@ -99,6 +100,7 @@ class ReportOptions:
     include_allocation: bool = True
     include_debt: bool = True
     include_inputs: bool = True
+    include_flows: bool = True
     include_disclaimer: bool = True
     # Resolvedor de clases y librería: hacen falta para que los activos propios
     # salgan agrupados en su clase declarada y documentados como tales.
@@ -258,8 +260,7 @@ def _cover(pdf: PdfPages, options: ReportOptions, scenario: Scenario,
         f"Capital inicial {format_money(scenario.initial_value)} · "
         f"horizonte {scenario.horizon} años · inflación {scenario.inflation:.2%} · "
         f"{result.n_paths:,} simulaciones · "
-        f"semilla {result.seed if result.seed is not None else 'aleatoria'} · "
-        f"valores {'en moneda de hoy' if settings.show_real_values else 'nominales'}"
+        f"semilla {result.seed if result.seed is not None else 'aleatoria'}"
     )
     for line in _wrap(ficha, 110):
         figure.text(MARGIN, y, line, color=INK_SOFT, fontsize=9)
@@ -323,8 +324,28 @@ def _chart_page(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: st
     return page_no + 1
 
 
-ROWS_PER_PAGE = 26
 BASE_TABLE_FONTSIZE = 8.0
+# Alto de una fila de tabla en fracción de figura, por punto de cuerpo. Es una
+# constante medida y no una estimación: matplotlib calcula el alto de celda a
+# partir del cuerpo de letra y de la altura de la **figura**, no de la del eje,
+# así que la misma tabla mide lo mismo la pongas en el eje que la pongas.
+# Incluye el 1.55 con que `_draw_table` escala el alto.
+ROW_HEIGHT_PER_POINT = 0.03124 / 8.0
+# Alto útil de una tabla a página completa, bajo el titular y sobre la nota.
+FULL_TABLE_HEIGHT = 0.72
+
+
+def _rows_that_fit(height: float, fontsize: float) -> int:
+    """Filas de datos que caben en un alto dado, descontando el encabezado.
+
+    Antes era un número fijo, y por eso una tabla de treinta filas se salía de
+    la hoja: veintiséis filas solo caben si el cuerpo de letra es pequeño, y el
+    cuerpo lo decide el ancho de la columna, no el número de filas.
+    """
+    return max(1, int(height / (fontsize * ROW_HEIGHT_PER_POINT)) - 1)
+
+
+ROWS_PER_PAGE = _rows_that_fit(FULL_TABLE_HEIGHT, BASE_TABLE_FONTSIZE)
 # Por debajo de este cuerpo la tabla deja de ser legible impresa, y es preferible
 # gastar una hoja por estrategia antes que apretarlas todas en una ilegible.
 MIN_TABLE_FONTSIZE = 5.5
@@ -335,6 +356,19 @@ MIN_TABLE_FONTSIZE = 5.5
 # de cuatro en adelante se reparte en una hoja por estrategia.
 COLUMN_INCHES = 0.50
 TABLE_GAP = 0.02
+
+
+def _footnote(figure: Figure, text: str):
+    """Nota al pie de una página de tablas, apilada de abajo hacia arriba.
+
+    Se corta por palabras: escrita de una sola tirada, una nota larga se salía
+    por el borde derecho de la hoja sin que nada lo avisara.
+    """
+    if not text:
+        return
+    for i, line in enumerate(reversed(_wrap(text, 150))):
+        figure.text(MARGIN, FOOTNOTE_BASE + i * FOOTNOTE_STEP, line,
+                    color=INK_SOFT, fontsize=7.5)
 
 
 def _draw_table(ax, columns: list[str], rows: list[list[str]], fontsize: float):
@@ -360,10 +394,11 @@ def _draw_table(ax, columns: list[str], rows: list[list[str]], fontsize: float):
 
 def _table_pages(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: str,
                  lede: str, columns: list[str], rows: list[list[str]],
-                 footnote: str = "", rows_per_page: int = ROWS_PER_PAGE) -> int:
+                 footnote: str = "", rows_per_page: int | None = None) -> int:
     """Una tabla sola, paginada. matplotlib no pagina solo: se corta a mano."""
     if not rows:
         rows = [["Sin datos"] + [""] * (len(columns) - 1)]
+    rows_per_page = rows_per_page or ROWS_PER_PAGE
 
     chunks = [rows[i:i + rows_per_page] for i in range(0, len(rows), rows_per_page)]
     for i, chunk in enumerate(chunks):
@@ -376,8 +411,7 @@ def _table_pages(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: s
         ax.axis("off")
         _draw_table(ax, columns, chunk, BASE_TABLE_FONTSIZE)
 
-        if footnote:
-            figure.text(MARGIN, 0.072, footnote, color=INK_SOFT, fontsize=7.5)
+        _footnote(figure, footnote)
         pdf.savefig(figure)
         page_no += 1
     return page_no
@@ -416,7 +450,10 @@ def _topic_page(pdf: PdfPages, options: ReportOptions, page_no: int,
             )
         return page_no
 
-    paginas = max(1, -(-max(len(filas) for _, filas in bloques) // ROWS_PER_PAGE))
+    # Cuántas filas caben depende del cuerpo de letra, que a su vez depende del
+    # ancho de columna: con más estrategias la letra encoge y caben más filas.
+    por_pagina = _rows_that_fit(FULL_TABLE_HEIGHT, fontsize)
+    paginas = max(1, -(-max(len(filas) for _, filas in bloques) // por_pagina))
     for p in range(paginas):
         figure = _new_page(pdf, options, eyebrow, page_no)
         figure.text(MARGIN, 0.90, lede if p == 0 else f"{lede} (continúa)",
@@ -427,7 +464,7 @@ def _topic_page(pdf: PdfPages, options: ReportOptions, page_no: int,
             _swatch(figure, x, 0.845, series_color(i))
             figure.text(x + 0.016, 0.845, nombre.upper(), color=NAVY, fontsize=8.5,
                         fontweight="semibold")
-            chunk = filas[p * ROWS_PER_PAGE:(p + 1) * ROWS_PER_PAGE]
+            chunk = filas[p * por_pagina:(p + 1) * por_pagina]
             if not chunk:
                 figure.text(x, 0.80, "Sin datos", color=INK_SOFT, fontsize=8)
                 continue
@@ -435,8 +472,114 @@ def _topic_page(pdf: PdfPages, options: ReportOptions, page_no: int,
             ax.axis("off")
             _draw_table(ax, tabla.columns, chunk, fontsize)
 
-        if tabla.footnote:
-            figure.text(MARGIN, 0.072, tabla.footnote, color=INK_SOFT, fontsize=7.5)
+        _footnote(figure, tabla.footnote)
+        pdf.savefig(figure)
+        page_no += 1
+    return page_no
+
+
+# Geometría de la hoja de anexo de una estrategia. El contenido empieza por
+# debajo del nombre de la estrategia y termina por encima de la nota al pie.
+ANNEX_TOP = 0.84
+ANNEX_BOTTOM = 0.10
+ANNEX_TITLE_DROP = 0.035  # lo que baja el rótulo de una tabla antes de la tabla
+ANNEX_BLOCK_GAP = 0.030   # aire entre una tabla y el rótulo de la siguiente
+# Por debajo de esto, lo que cabe en la columna es un encabezado y un par de
+# filas: no es una tabla, es un cabo suelto, y conviene empezar en la otra.
+MIN_ROWS_IN_COLUMN = 4
+
+
+def _annex_layout(bloques: list["_AnnexBlock"], row_height: float
+                  ) -> list[list[tuple[int, float, "_AnnexBlock", list[list[str]], bool]]]:
+    """Reparte las tablas en dos columnas, por su alto real.
+
+    No es una retícula de celdas iguales: una tabla de cuatro filas y una de
+    quince no ocupan lo mismo, y repartir la hoja en cuartos dejaba a una
+    desbordada sobre la de abajo y a la otra con media hoja en blanco. Cada
+    tabla se coloca en la columna que tenga más sitio libre y baja el cursor de
+    esa columna exactamente lo que mide.
+
+    Devuelve una lista de hojas; cada hoja es una lista de
+    `(columna, tope, bloque, filas, continúa)`.
+    """
+    hojas: list[list[tuple[int, float, _AnnexBlock, list[list[str]], bool]]] = [[]]
+    cursores = [ANNEX_TOP, ANNEX_TOP]
+
+    for bloque in bloques:
+        filas = bloque.rows or [["Sin datos"] + [""] * (len(bloque.columns) - 1)]
+        i = 0
+        while i < len(filas):
+            columna = 0 if cursores[0] >= cursores[1] else 1
+            sitio = cursores[columna] - ANNEX_BOTTOM - ANNEX_TITLE_DROP
+            caben = int(sitio / row_height) - 1  # menos la fila de encabezado
+            if caben < MIN_ROWS_IN_COLUMN:
+                if not hojas[-1]:
+                    # Ni en una hoja vacía cabe: se fuerza aquí antes que dar
+                    # vueltas abriendo hojas que tampoco servirían.
+                    caben = max(1, caben)
+                else:
+                    hojas.append([])
+                    cursores = [ANNEX_TOP, ANNEX_TOP]
+                    continue
+
+            trozo = filas[i:i + caben]
+            tope = cursores[columna]
+            hojas[-1].append((columna, tope, bloque, trozo, i > 0))
+            cursores[columna] = (
+                tope - ANNEX_TITLE_DROP - (len(trozo) + 1) * row_height - ANNEX_BLOCK_GAP
+            )
+            i += caben
+
+    return hojas
+
+
+def _strategy_annex_page(pdf: PdfPages, options: ReportOptions, page_no: int,
+                         anexo: "_StrategyAnnex", footnote: str = "") -> int:
+    """El anexo de una estrategia: **todas sus tablas en una hoja**.
+
+    Las tablas se reparten en dos columnas. Es la disposición que cabe: a una
+    sola columna la asignación se comería la hoja entera y la proyección se
+    iría a la siguiente, que es justo lo que esta página viene a evitar.
+
+    Si aun así no caben todas, las que sobran siguen en otra hoja de la misma
+    estrategia. Nunca se mezcla con el anexo de otra: la ficha de una estrategia
+    se arranca del informe y se entrega, y para eso tiene que ser suya entera.
+    """
+    bloques = anexo.blocks
+    if not bloques:
+        bloques = [_AnnexBlock("Sin datos", ["Indicador", "Valor"], [])]
+
+    ancho = (1 - 2 * MARGIN - TABLE_GAP) / 2
+
+    # El cuerpo de letra lo fija la tabla más ancha de la hoja: dos tablas de la
+    # misma hoja con cuerpos distintos se leen como si una fuera menos
+    # importante que la otra, y aquí todas son la misma ficha.
+    max_columnas = max(len(b.columns) for b in bloques)
+    pulgadas = ancho / max_columnas * PAGE_SIZE[0]
+    fontsize = max(
+        MIN_TABLE_FONTSIZE,
+        BASE_TABLE_FONTSIZE * min(1.0, pulgadas / COLUMN_INCHES),
+    )
+    row_height = fontsize * ROW_HEIGHT_PER_POINT
+
+    titulo = f"Anexo · Hoja {anexo.number} · {anexo.name}"
+    for p, hoja in enumerate(_annex_layout(bloques, row_height)):
+        figure = _new_page(pdf, options, "Anexo", page_no)
+        _swatch(figure, MARGIN, 0.883, series_color(anexo.index))
+        figure.text(MARGIN + 0.018, 0.90, titulo if p == 0 else f"{titulo} (continúa)",
+                    color=INK, fontsize=14, fontweight="semibold", va="top")
+
+        for columna, tope, bloque, filas, continua in hoja:
+            x = MARGIN + columna * (ancho + TABLE_GAP)
+            etiqueta = f"{bloque.kind} (continúa)" if continua else bloque.kind
+            figure.text(x, tope, etiqueta.upper(), color=NAVY, fontsize=8,
+                        fontweight="semibold", va="top")
+            alto = (len(filas) + 1) * row_height
+            ax = figure.add_axes((x, tope - ANNEX_TITLE_DROP - alto, ancho, alto))
+            ax.axis("off")
+            _draw_table(ax, bloque.columns, filas, fontsize)
+
+        _footnote(figure, footnote)
         pdf.savefig(figure)
         page_no += 1
     return page_no
@@ -816,14 +959,16 @@ DISTRIBUTION_COLUMNS = [
 
 SUMMARY_INDICATORS = [
     ("Probabilidad de éxito", lambda s, real: f"{s.success_probability:.1%}"),
-    ("Retorno de largo plazo", lambda s, real: f"{s.summary.arithmetic_return:.2%}"),
+    ("Retorno compuesto de largo plazo",
+     lambda s, real: f"{s.summary.compound_return:.2%}"),
     ("Volatilidad de largo plazo", lambda s, real: f"{s.summary.volatility:.2%}"),
-    ("Retorno compuesto", lambda s, real: f"{s.summary.compound_return:.2%}"),
     ("Yield de largo plazo", lambda s, real: f"{s.summary.yield_:.2%}"),
     ("Sharpe de largo plazo", lambda s, real: f"{s.summary.sharpe_ratio:.2f}"),
     ("Patrimonio mediano final",
      lambda s, real: format_money(float(np.median(s.terminal_values(real))))),
     ("CVaR 5% al final", lambda s, real: format_money(s.cvar(s.horizon, 0.05, real))),
+    ("Cambio del patrimonio en el último año",
+     lambda s, real: f"{s.last_year_change(real):.2%}"),
 ]
 
 
@@ -850,11 +995,49 @@ def _summary_table(options: ReportOptions, result: SimulationResult,
             for s in result.strategies
         ],
         footnote=(
-            "El Sharpe usa como tasa libre de riesgo el retorno de la clase de "
-            "caja. Los supuestos resumen explican la proyección; no son una "
-            f"predicción. {moneda}"
+            "El Sharpe usa como tasa libre de riesgo el retorno de la clase de caja. "
+            "El retorno compuesto ya lleva descontado el arrastre de la volatilidad. "
+            "El cambio del último año no es rentabilidad: es la variación del "
+            f"patrimonio neto con aportes y retiros incluidos. {moneda}"
         ),
     )
+
+
+FLOWS = "Ingresos y retiros por año"
+
+FLOW_COLUMNS = ["Año", "Aportes", "Retiros", "Neto"]
+
+
+@dataclass
+class _AnnexBlock:
+    """Una tabla del anexo de una estrategia, con su rótulo."""
+
+    kind: str
+    columns: list[str]
+    rows: list[list[str]]
+
+
+@dataclass
+class _StrategyAnnex:
+    """El anexo de **una** estrategia: todas sus tablas en una hoja.
+
+    El anexo se organizaba por tema, con la tabla de cada estrategia al lado de
+    la de las demás. Leerlo así obliga a recorrer el anexo entero para armar la
+    ficha de una estrategia: su asignación en una hoja, su proyección en otra,
+    su deuda en una tercera. Organizado por estrategia, esa ficha es una sola
+    página y se puede arrancar y entregar.
+    """
+
+    number: int
+    name: str
+    index: int
+    blocks: list[_AnnexBlock]
+
+    def block(self, kind: str) -> _AnnexBlock | None:
+        for block in self.blocks:
+            if block.kind == kind:
+                return block
+        return None
 
 
 def _build_annex(
@@ -862,92 +1045,123 @@ def _build_annex(
     scenario: Scenario,
     result: SimulationResult,
     years: list[int],
-    real: bool,
     con_deuda: bool,
-    moneda: str,
-) -> list[_AnnexTable]:
-    """Las tablas del anexo: un tema por entrada, con una tabla por estrategia.
+) -> list[_StrategyAnnex]:
+    """El anexo: una entrada por estrategia, con todas sus tablas.
 
-    Solo entra el tema de una sección que el usuario haya pedido: un anexo con
+    Solo entra la tabla de una sección que el usuario haya pedido: un anexo con
     el detalle de una gráfica que no está en el documento no lo entendería nadie.
     """
-    pendientes: list[tuple[str, list[str], list[tuple[str, list[list[str]]]], str]] = []
-
+    pesos: dict[str, list[list[str]]] = {}
     if options.include_allocation:
         columnas = ["Clase de activo", "Sub-clase", "Peso"]
-        filas_por_estrategia: dict[str, list[list[str]]] = {}
         for row in allocation_table_rows(scenario, options.resolver):
-            filas_por_estrategia.setdefault(row["Estrategia"], []).append(
-                [row[c] for c in columnas]
-            )
-        bloques = [
-            (s.name, filas_por_estrategia[s.name])
-            for s in scenario.strategies if filas_por_estrategia.get(s.name)
-        ]
-        if bloques:
-            pendientes.append((
-                ALLOCATION, columnas, bloques,
-                "Pesos normalizados sobre el total cargado de cada estrategia.",
-            ))
+            pesos.setdefault(row["Estrategia"], []).append([row[c] for c in columnas])
 
+    distribuciones: dict[tuple[str, bool], list[list[str]]] = {}
     if options.include_distribution:
         # Las dos unidades, siempre: la nominal es la que verá en su extracto y
         # la real es la que dice qué podrá comprar. Elegir una escondía la otra.
-        for kind, es_real in ((DISTRIBUTION, False), (DISTRIBUTION_REAL, True)):
-            todas = distribution_table_rows(result, years, es_real)
-            bloques = []
-            for strategy in result.strategies:
-                filas = [
+        for es_real in (False, True):
+            for row in distribution_table_rows(result, years, es_real):
+                distribuciones.setdefault((row["Estrategia"], es_real), []).append(
                     [str(row[c]) for c in DISTRIBUTION_COLUMNS]
-                    for row in todas if row["Estrategia"] == strategy.name
-                ]
-                if filas:
-                    bloques.append((strategy.name, filas))
-            if bloques:
-                nota = (
-                    "Valores en moneda de hoy, descontados a la inflación del escenario."
-                    if es_real else "Valores nominales."
                 )
-                pendientes.append((kind, DISTRIBUTION_COLUMNS, bloques, nota))
 
-    if con_deuda:
-        pendientes.append((
-            DEBT, ["Indicador", "Valor"],
+    anexos: list[_StrategyAnnex] = []
+    for i, strategy in enumerate(result.strategies):
+        bloques: list[_AnnexBlock] = []
+
+        if pesos.get(strategy.name):
+            bloques.append(_AnnexBlock(
+                ALLOCATION, ["Clase de activo", "Sub-clase", "Peso"],
+                pesos[strategy.name],
+            ))
+
+        for kind, es_real in ((DISTRIBUTION, False), (DISTRIBUTION_REAL, True)):
+            filas = distribuciones.get((strategy.name, es_real))
+            if filas:
+                bloques.append(_AnnexBlock(kind, DISTRIBUTION_COLUMNS, filas))
+
+        if con_deuda:
+            bloques.append(_AnnexBlock(
+                DEBT, ["Indicador", "Valor"],
+                [
+                    ["Probabilidad de llamada a margen",
+                     f"{strategy.margin_call_probability:.1%}"],
+                    ["Llamadas promedio por camino",
+                     f"{strategy.margin_calls.mean():.2f}"
+                     if strategy.margin_calls.size else "0.00"],
+                    ["Liquidación forzada máxima",
+                     format_money(float(strategy.forced_sales.max()))
+                     if strategy.forced_sales.size else "0"],
+                ],
+            ))
+
+        # Sin ninguna sección pedida no hay hoja que escribir: una página con el
+        # nombre de la estrategia y nada debajo no es un anexo.
+        if bloques:
+            anexos.append(_StrategyAnnex(
+                number=len(anexos) + 1, name=strategy.name, index=i, blocks=bloques,
+            ))
+
+    return anexos
+
+
+def _flows_table(result: SimulationResult, number: int) -> _AnnexTable | None:
+    """La serie de aportes y retiros año por año, una tabla por estrategia.
+
+    Va aparte de la hoja de cada estrategia porque tiene una fila por año del
+    horizonte —treinta, no cuatro— y no cabe en un cuarto de página. Y hace
+    falta: es la única forma de comprobar que un flujo indexado crece como se
+    esperaba, que un porcentual se recalcula sobre el patrimonio vigente, y que
+    ninguno de los dos se sale del rango de años que se le configuró.
+    """
+    bloques: list[tuple[str, list[list[str]]]] = []
+    for strategy in result.strategies:
+        serie = strategy.flow_history()
+        if not (serie["aportes"].any() or serie["retiros"].any()):
+            continue
+        bloques.append((
+            strategy.name,
             [
-                (
-                    s.name,
-                    [
-                        ["Probabilidad de llamada a margen",
-                         f"{s.margin_call_probability:.1%}"],
-                        ["Llamadas promedio por camino",
-                         f"{s.margin_calls.mean():.2f}" if s.margin_calls.size else "0.00"],
-                        ["Liquidación forzada máxima",
-                         format_money(float(s.forced_sales.max()))
-                         if s.forced_sales.size else "0"],
-                    ],
-                )
-                for s in result.strategies
+                [
+                    str(year),
+                    format_money(float(serie["aportes"][year - 1])),
+                    format_money(float(serie["retiros"][year - 1])),
+                    format_money(float(serie["neto"][year - 1])),
+                ]
+                for year in range(1, strategy.horizon + 1)
             ],
-            "",
         ))
 
-    return [
-        _AnnexTable(number=i, kind=kind, columns=columnas, per_strategy=bloques,
-                    footnote=nota)
-        for i, (kind, columnas, bloques, nota) in enumerate(pendientes, start=1)
-    ]
+    if not bloques:
+        return None
+    return _AnnexTable(
+        number=number, kind=FLOWS, columns=FLOW_COLUMNS, per_strategy=bloques,
+        footnote=(
+            "Valores nominales y medianos sobre los caminos simulados. Un flujo de "
+            "monto fijo es igual en todos los caminos; uno expresado como porcentaje "
+            "del patrimonio no, porque se recalcula cada año sobre el patrimonio "
+            "vigente de cada camino."
+        ),
+    )
 
 
-def _cite(annex: list[_AnnexTable], kind: str, extra: str = "") -> str:
-    """Remite a la tabla del anexo de un tema.
+def _cite(annex: list[_StrategyAnnex], kind: str, extra: str = "") -> str:
+    """Remite a las hojas del anexo que traen el detalle de un tema.
 
-    Un tema ocupa una sola hoja, con la tabla de cada estrategia al lado de la
-    de las demás, así que la cita es una referencia y no una lista.
+    El anexo va por estrategia, así que el detalle de una gráfica —que compara
+    todas— está repartido entre sus hojas, una por estrategia.
     """
-    numeros = [t.number for t in annex if t.kind == kind]
+    numeros = [a.number for a in annex if a.block(kind) is not None]
     if not numeros:
         return extra
-    return f"{extra} Detalle en el Anexo · Tabla {numeros[0]}.".strip()
+    if len(numeros) == 1:
+        cita = f"Detalle en el Anexo · Hoja {numeros[0]}."
+    else:
+        cita = f"Detalle en el Anexo · Hojas {numeros[0]} a {numeros[-1]}."
+    return f"{extra} {cita}".strip()
 
 
 def build_report(
@@ -965,17 +1179,23 @@ def build_report(
     viven en el anexo, un tema por hoja con la tabla de cada estrategia al lado
     de la de las demás, y cada gráfica cita la suya.
 
-    `settings.show_real_values` sigue decidiendo la unidad de los supuestos
-    resumen, pero ya no la de la distribución: esa se imprime en las dos.
+    El anexo va **por estrategia**: una hoja con su asignación, su proyección en
+    las dos unidades y su deuda, en vez de una hoja por tema con todas las
+    estrategias. Detrás van los ingresos y retiros año por año, que por su largo
+    —una fila por año del horizonte— no caben en esa retícula.
     """
     apply_matplotlib_style()
     path = Path(path)
-    real = settings.show_real_values
+    # Las cifras en dinero de los supuestos resumen son nominales. La unidad ya
+    # no se configura: la distribución se imprime en las dos y el resumen usa la
+    # que se lee en un extracto.
+    real = False
     years = settings.milestones_within(scenario.horizon)
-    moneda = "Valores en moneda de hoy." if real else "Valores nominales."
+    moneda = "Valores nominales."
     con_deuda = options.include_debt and any(s.debt.max() > 0 for s in result.strategies)
 
-    annex = _build_annex(options, scenario, result, years, real, con_deuda, moneda)
+    annex = _build_annex(options, scenario, result, years, con_deuda)
+    flows = _flows_table(result, len(annex) + 1) if options.include_flows else None
 
     with PdfPages(path) as pdf:
         _cover(pdf, options, scenario, result, settings)
@@ -1038,8 +1258,20 @@ def build_report(
                 ),
             )
 
-        for tabla in annex:
-            page = _topic_page(pdf, options, page, tabla)
+        for anexo in annex:
+            page = _strategy_annex_page(
+                pdf, options, page, anexo,
+                footnote=(
+                    "Pesos normalizados sobre el total cargado de la estrategia. "
+                    "Percentiles calculados sobre los caminos simulados."
+                ),
+            )
+
+        if flows is not None:
+            page = _topic_page(
+                pdf, options, page, flows,
+                lede=f"Anexo · Hoja {flows.number} · {FLOWS}",
+            )
 
         info = pdf.infodict()
         info["Title"] = options.title

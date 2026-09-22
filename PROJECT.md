@@ -7,6 +7,10 @@ portafolio multiactivo, con flujos, apalancamiento y comparación de estrategias
 Referencia: `HIP GBP 20260603.pdf` (presentación de J.P. Morgan a Hiptage
 Investments Corp., jun 2026), que se usa como caso de control del motor.
 
+**[`MODELO.md`](MODELO.md) explica el modelo de proyección en detalle** —qué
+supone, cómo sortea, por qué importa la correlación y qué no hace. Este
+documento cubre la arquitectura y las decisiones de ingeniería.
+
 ---
 
 ## Estado
@@ -55,7 +59,11 @@ $env:PYTHONPATH="."; .\.venv\Scripts\python.exe tools\smoke_pdf_case.py
    - **Capital** — hereda el del escenario, o uno propio si se marca la casilla.
 3. **Activos** y **Correlaciones** — supuestos de mercado, en solo lectura.
 4. **Ajustes** — número de simulaciones (10.000 por defecto), semilla, años hito.
-5. **Correr simulación** (o F5) y revisar las cuatro pestañas de resultado.
+5. **Correr simulación** (o F5) y revisar las pestañas de resultado:
+   **Distribución** (nominal), **Ajustada por inflación** (la misma proyección en
+   moneda de hoy), **Supuestos**, **Asignación** y **Deuda**. La unidad no se
+   configura: las dos están siempre a un clic, porque la nominal es la que verá
+   en su extracto y la real la que dice qué podrá comprar.
 6. **Exportar PDF** (o Ctrl+E) para dejar el registro de la corrida y entregarlo.
 
 Comparar dos planes distintos —uno apalancado contra uno sin deuda, o uno con
@@ -262,20 +270,33 @@ el lienzo de Qt (`clear`, `set_hover_probe`, `finish`) sobre una figura suelta.
 El precio es paginar las tablas a mano, en `_table_pages`.
 
 **Estructura**: portada · supuestos del caso · asignación de activos ·
-distribución · deuda · **anexo**.
+**supuestos resumen** · distribución nominal · distribución en moneda de hoy ·
+deuda · **anexo**.
 
-**En el cuerpo no va ninguna tabla.** Todas viven en el anexo, donde cada una es
-de **una sola estrategia** y están agrupadas por tipo: la asignación de A
-seguida de la de B, luego la distribución de A y la de B, y así. Agrupar por
-tipo y no por estrategia deja comparables las tablas que se leen juntas. Cada
-gráfica cita todas las tablas de su tipo —compara estrategias, así que su
-detalle está repartido— con `_cite`: *"Detalle en el Anexo · Tablas 3 y 4"*.
+**La única tabla del cuerpo son los supuestos resumen**, y va justo antes de la
+proyección que explican. Las demás viven en el anexo, y ahí **cada estrategia
+ocupa una hoja** (`_strategy_annex_page`): su asignación, su proyección en las
+dos unidades y su deuda, repartidas en dos columnas por su alto real. La ficha
+completa de una estrategia es una página que se arranca y se entrega; por tema,
+había que recorrer el anexo entero para armarla. Cada gráfica cita el rango de
+hojas con `_cite`: *"Detalle en el Anexo · Hojas 1 a 3"*.
 
-Tres reglas que conviene no deshacer:
+Detrás va una hoja más con los **ingresos y retiros año por año** (`_flows_table`),
+una tabla por estrategia. No cabe en la retícula de una ficha porque tiene una
+fila por año del horizonte, y hace falta para comprobar que un flujo indexado
+crece como se esperaba y que uno porcentual se recalcula sobre el patrimonio
+vigente. La serie es la **realizada en la simulación**, no la configurada:
+`StrategyResult.contributions` y `.withdrawals` la registran camino a camino.
+
+Cuatro reglas que conviene no deshacer:
 
 - **Los números del anexo se reservan antes de escribir la primera página**, en
   `_build_annex`. Las gráficas del cuerpo los citan y el PDF se escribe de una
   sola pasada con `PdfPages`; sin reservarlos primero harían falta dos.
+- **Cuántas filas caben se calcula, no se fija.** `_rows_that_fit` lo deriva del
+  cuerpo de letra: el alto de celda de matplotlib depende de la fuente y de la
+  altura de la **figura**, no de la del eje. Con el número fijo que había antes,
+  una tabla de treinta filas se salía por debajo de la hoja.
 - **Las páginas de gráfico no llevan titular propio.** Cada gráfico ya abre con
   su frase descriptiva, que es una regla del manual y vive dentro de la función
   que lo dibuja. Poner otro encima lo duplica palabra por palabra.

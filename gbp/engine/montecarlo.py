@@ -77,6 +77,27 @@ def _flow_schedules(
     return inflows, outflows
 
 
+def _rate_schedules(
+    flows: list[CashFlow], horizon: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fracciones de entrada y de salida por año, ambas positivas.
+
+    `combined_rate_schedule` devuelve el neto, que es lo que necesita el motor.
+    El registro del anexo necesita las dos mitades por separado: un año con un
+    aporte del 3% y un retiro del 4% no es lo mismo que un año con un retiro
+    del 1%, aunque el patrimonio termine igual.
+    """
+    inflows = np.zeros(horizon)
+    outflows = np.zeros(horizon)
+    for flow in flows:
+        schedule = flow.rate_schedule(horizon)
+        if flow.kind is FlowKind.INFLOW:
+            inflows += schedule
+        else:
+            outflows += -schedule
+    return inflows, outflows
+
+
 def _simulate_asset_returns(
     names: list[str],
     cmas: CMASet,
@@ -133,6 +154,11 @@ def _simulate_strategy(
 
     inflows, outflows = _flow_schedules(strategy.cashflows, horizon, inflation)
     flow_rates = combined_rate_schedule(strategy.cashflows, horizon)
+    # Las dos mitades del flujo porcentual por separado, solo para el registro:
+    # sobre una base que se fija antes de aplicar nada, aplicarlas juntas o por
+    # separado da el mismo patrimonio, pero el anexo necesita saber cuánto
+    # entró y cuánto salió, no solo el neto.
+    rate_in, rate_out = _rate_schedules(strategy.cashflows, horizon)
 
     loan = strategy.loan
     reference_cash = 0.0
@@ -146,9 +172,12 @@ def _simulate_strategy(
         else None
     )
 
-    assets = np.full(n_paths, float(strategy.resolved_initial(scenario_initial)))
+    initial_value = float(strategy.resolved_initial(scenario_initial))
+    assets = np.full(n_paths, initial_value)
     assets_history = np.zeros((n_paths, horizon))
     debt_history = np.zeros((n_paths, horizon))
+    contributions = np.zeros((n_paths, horizon))
+    withdrawals = np.zeros((n_paths, horizon))
 
     for year in range(1, horizon + 1):
         y = year - 1
@@ -157,6 +186,7 @@ def _simulate_strategy(
             assets += ledger.drawdown(year)
 
         assets += inflows[y]
+        contributions[:, y] = inflows[y]
 
         growth = np.where(assets > 0, portfolio_growth[:, y], _year_cash(cash_rate, y) + 1.0)
         assets = assets * growth
@@ -165,11 +195,15 @@ def _simulate_strategy(
             rates = _loan_rates(loan, cash_rate, y, n_paths)
             assets -= ledger.accrue_and_amortize(year, rates)
 
-        if flow_rates[y]:
+        if flow_rates[y] or rate_in[y] or rate_out[y]:
             net_wealth = assets - ledger.balance if ledger is not None else assets
-            assets += np.maximum(net_wealth, 0.0) * flow_rates[y]
+            base = np.maximum(net_wealth, 0.0)
+            assets += base * flow_rates[y]
+            contributions[:, y] += base * rate_in[y]
+            withdrawals[:, y] += base * rate_out[y]
 
         assets -= outflows[y]
+        withdrawals[:, y] += outflows[y]
 
         if ledger is not None:
             # La liquidación forzada **sale del portafolio**: se venden activos y
@@ -205,6 +239,9 @@ def _simulate_strategy(
         margin_calls=ledger.margin_calls if ledger else np.zeros(n_paths, dtype=int),
         forced_sales=ledger.forced_sales if ledger else np.zeros(n_paths),
         inflation_factors=inflation_factors,
+        contributions=contributions,
+        withdrawals=withdrawals,
+        initial_value=initial_value,
     )
 
 

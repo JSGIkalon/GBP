@@ -93,9 +93,15 @@ class ExportDialog(QDialog):
         self.distribution = QCheckBox("Distribución del patrimonio")
         self.summary = QCheckBox("Supuestos resumen por estrategia")
         self.debt = QCheckBox("Deuda y llamadas a margen")
+        self.flows = QCheckBox("Ingresos y retiros año por año (anexo)")
+        self.flows.setToolTip(
+            "La serie realizada de aportes y retiros. Es la forma de comprobar que "
+            "un flujo indexado crece como se esperaba y que uno porcentual se "
+            "recalcula sobre el patrimonio vigente."
+        )
         self.disclaimer = QCheckBox("Aviso legal en la portada")
         for box in (self.inputs, self.allocation, self.distribution, self.summary,
-                    self.disclaimer):
+                    self.flows, self.disclaimer):
             box.setChecked(True)
             sections_layout.addWidget(box)
         # Sin apalancamiento la sección de deuda no tiene nada que mostrar.
@@ -106,9 +112,9 @@ class ExportDialog(QDialog):
         # Justo antes del aviso legal, que es el orden en que salen en el PDF.
         sections_layout.insertWidget(4, self.debt)
         annex_note = QLabel(
-            "En el cuerpo no va ninguna tabla: todas salen al final, en un anexo "
-            "numerado con una tabla por estrategia que cada gráfica cita. Se "
-            "incluyen con su sección."
+            "En el cuerpo la única tabla son los supuestos resumen. Las demás salen "
+            "al final, en un anexo con una hoja por estrategia que reúne toda su "
+            "información y que cada gráfica cita. Se incluyen con su sección."
         )
         annex_note.setWordWrap(True)
         annex_note.setStyleSheet(f"color: {INK_SOFT};")
@@ -138,6 +144,7 @@ class ExportDialog(QDialog):
             include_allocation=self.allocation.isChecked(),
             include_debt=self.debt.isChecked(),
             include_inputs=self.inputs.isChecked(),
+            include_flows=self.flows.isChecked(),
             include_disclaimer=self.disclaimer.isChecked(),
         )
 

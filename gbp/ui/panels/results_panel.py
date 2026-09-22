@@ -3,6 +3,12 @@
 La distribución hace el trabajo que antes se repartía entre dos pestañas: el
 box plot muestra el rango y la tabla de abajo trae las cifras exactas, que es
 además la vista alternativa al color que exige el manual de marca.
+
+Y se muestra **dos veces**, en dos pestañas: en valores nominales y en moneda de
+hoy. Ajustar por inflación no es una preferencia de configuración —la nominal es
+la que verá en su extracto y la real es la que dice qué podrá comprar—, así que
+las dos están siempre a un clic en vez de detrás de una casilla que cambia el
+significado de todo lo demás sin decirlo.
 """
 
 from __future__ import annotations
@@ -63,17 +69,19 @@ class ResultsPanel(QTabWidget):
         self.result: SimulationResult | None = None
         self.settings = SimulationSettings()
 
-        # --- Distribución ----------------------------------------------
-        distribution = QWidget()
-        d_layout = QVBoxLayout(distribution)
-        self.box_canvas = ChartCanvas(height=4.6)
-        d_layout.addWidget(self.box_canvas, 3)
+        # --- Distribución, en las dos unidades ---------------------------
         self.range_columns = [
             "Estrategia", "Año", "p10", "p25", "Mediana", "p75", "p90", "Media", "Desv. est.",
         ]
-        self.range_table = _table(self.range_columns)
-        d_layout.addWidget(self.range_table, 2)
-        self.addTab(distribution, "Distribución")
+        self.box_canvas, self.range_table = self._add_distribution_tab(
+            "Distribución",
+            "Valores nominales: el patrimonio tal como aparecerá en el extracto.",
+        )
+        self.real_canvas, self.real_table = self._add_distribution_tab(
+            "Ajustada por inflación",
+            "Valores en moneda de hoy, descontados a la inflación del escenario: "
+            "lo que ese patrimonio podría comprar hoy.",
+        )
 
         # --- Supuestos --------------------------------------------------
         summary = QWidget()
@@ -90,7 +98,13 @@ class ResultsPanel(QTabWidget):
         note = QLabel(
             "Los supuestos resumen explican con qué se construyó la proyección; no son "
             "una predicción. El Sharpe usa como tasa libre de riesgo el retorno de la "
-            "clase de caja."
+            "clase de caja. El retorno compuesto es el que capitaliza año tras año: ya "
+            "lleva descontado el arrastre de la volatilidad sobre el retorno aritmético, "
+            "y es el único que se muestra porque es el que gobierna la proyección.\n\n"
+            "El cambio del patrimonio en el último año no es rentabilidad: es la "
+            "variación mediana del patrimonio neto entre el penúltimo año y el último, "
+            "aportes y retiros incluidos. Dice si al final del horizonte el plan todavía "
+            "crece o ya se está consumiendo. Las cifras en dinero son nominales."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: #5C6770;")
@@ -132,12 +146,27 @@ class ResultsPanel(QTabWidget):
         self.clear()
 
     # ------------------------------------------------------------------
+    def _add_distribution_tab(self, title: str, note: str):
+        """Una pestaña de distribución: box plot, tabla y la nota de su unidad."""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        canvas = ChartCanvas(height=4.6)
+        layout.addWidget(canvas, 3)
+        table = _table(self.range_columns)
+        layout.addWidget(table, 2)
+        label = QLabel(note)
+        label.setWordWrap(True)
+        label.setStyleSheet("color: #5C6770;")
+        layout.addWidget(label)
+        self.addTab(page, title)
+        return canvas, table
+
     def clear(self):
         self.result = None
-        for canvas in (self.box_canvas, self.debt_canvas):
+        for canvas in (self.box_canvas, self.real_canvas, self.debt_canvas):
             canvas.show_message(EMPTY)
         self.headline.setText(EMPTY)
-        for table in (self.range_table, self.summary_table, self.debt_table):
+        for table in (self.range_table, self.real_table, self.summary_table, self.debt_table):
             table.setRowCount(0)
 
     def show_allocation(self, scenario: Scenario, resolver=None):
@@ -157,20 +186,19 @@ class ResultsPanel(QTabWidget):
         self.result = result
         self.settings = settings
         years = settings.milestones_within(horizon)
-        real = settings.show_real_values
 
-        draw_box_chart(self.box_canvas, result, years, real)
-        _fill(
-            self.range_table,
-            distribution_table_rows(result, years, real),
-            self.range_columns,
-        )
+        for canvas, table, real in (
+            (self.box_canvas, self.range_table, False),
+            (self.real_canvas, self.real_table, True),
+        ):
+            draw_box_chart(canvas, result, years, real)
+            _fill(table, distribution_table_rows(result, years, real), self.range_columns)
 
-        self._show_summary(result, real)
+        self._show_summary(result)
         self._show_debt(result)
 
     # ------------------------------------------------------------------
-    def _show_summary(self, result: SimulationResult, real: bool):
+    def _show_summary(self, result: SimulationResult, real: bool = False):
         names = result.names
         columns = ["Indicador", *names]
         self.summary_table.setColumnCount(len(columns))
@@ -182,9 +210,8 @@ class ResultsPanel(QTabWidget):
 
         indicators = [
             ("Probabilidad de éxito", lambda s: f"{s.success_probability:.1%}"),
-            ("Retorno de largo plazo", lambda s: f"{s.summary.arithmetic_return:.2%}"),
+            ("Retorno compuesto de largo plazo", lambda s: f"{s.summary.compound_return:.2%}"),
             ("Volatilidad de largo plazo", lambda s: f"{s.summary.volatility:.2%}"),
-            ("Retorno compuesto", lambda s: f"{s.summary.compound_return:.2%}"),
             ("Yield de largo plazo", lambda s: f"{s.summary.yield_:.2%}"),
             ("Sharpe de largo plazo", lambda s: f"{s.summary.sharpe_ratio:.2f}"),
             (
@@ -194,6 +221,10 @@ class ResultsPanel(QTabWidget):
             (
                 "CVaR 5% al final",
                 lambda s: format_money(s.cvar(s.horizon, 0.05, real)),
+            ),
+            (
+                "Cambio del patrimonio en el último año",
+                lambda s: f"{s.last_year_change(real):.2%}",
             ),
         ]
 
@@ -224,8 +255,7 @@ class ResultsPanel(QTabWidget):
             f"<div style='font-size:15px;'>{lede}</div>"
             f"<div style='color:{BLUE_MID}; margin-top:4px;'>{detail}</div>"
             f"<div style='color:{INK_SOFT}; font-size:12px;'>{result.n_paths:,} simulaciones · "
-            f"semilla {result.seed if result.seed is not None else 'aleatoria'}"
-            f"{' · valores en moneda de hoy' if real else ' · valores nominales'}</div>"
+            f"semilla {result.seed if result.seed is not None else 'aleatoria'}</div>"
         )
 
     def _show_debt(self, result: SimulationResult):

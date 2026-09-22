@@ -416,6 +416,63 @@ Activos propios: la app deja de servir solo para patrimonios en EE.UU.
   camino es dejar elegir un activo de referencia concreto — la regla está
   aislada en `extend_correlations`, así que no obliga a rehacer nada.
 
+## Sesión 14 — 22 sep 2026
+
+El ajuste por inflación deja de ser una opción, un solo retorno en la tabla de
+supuestos, y el anexo se reorganiza por estrategia.
+
+**Hecho**
+
+- **La proyección ajustada por inflación es una pestaña, no un ajuste.**
+  `Distribución` (nominal) y `Ajustada por inflación` conviven en resultados, con
+  su propio box plot y su propia tabla. `show_real_values` desaparece de
+  `SimulationSettings`, del panel de Ajustes y del archivo de configuración.
+- **Un solo retorno en los supuestos resumen.** Se quita el aritmético
+  ("Retorno de largo plazo") y queda el **compuesto**, renombrado a "Retorno
+  compuesto de largo plazo". `SummaryAssumptions.arithmetic_return` se conserva
+  —lo necesitan el Sharpe y el motor—, solo deja de mostrarse.
+- **Nuevo indicador: cambio del patrimonio en el último año.**
+  `StrategyResult.last_year_change` da la variación mediana del patrimonio neto
+  entre el penúltimo año y el último, **aportes y retiros incluidos**. No es
+  rentabilidad: dice si al final del horizonte el plan todavía crece o ya se
+  está consumiendo.
+- **El anexo del PDF pasa de ir por tema a ir por estrategia.** Cada estrategia
+  ocupa **una hoja** con su asignación, su proyección en las dos unidades y su
+  deuda (`_strategy_annex_page`). Las gráficas citan el rango de hojas.
+- **Nuevo anexo de ingresos y retiros año por año** (`_flows_table`), con su
+  propia casilla en la ventana de exportación. La serie es la **realizada en la
+  simulación**: el motor registra `contributions` y `withdrawals` camino a
+  camino, así que un flujo porcentual aparece con el monto que de verdad tuvo.
+- Tests del informe reescritos sobre el contrato nuevo, más dos que comprueban
+  la serie de flujos y el crecimiento del retiro indexado. **174 en verde.**
+
+**Decisiones y hallazgos**
+
+- **La retícula de celdas iguales no servía para la hoja de una estrategia.** Una
+  tabla de cuatro filas y una de quince no ocupan lo mismo: repartir la hoja en
+  cuartos desbordaba la asignación sobre el rótulo de la tabla de abajo y dejaba
+  media hoja en blanco. Ahora las tablas se colocan por su **alto real**, cada
+  una en la columna que tenga más sitio libre.
+- **El alto de fila de una tabla de matplotlib es constante en fracción de
+  figura**: se calcula a partir del cuerpo de letra y de la altura de la
+  **figura**, no de la del eje. Medido —0.03124 por cada 8 puntos, con el 1.55 de
+  `_draw_table` dentro—, se puede maquetar sin dibujar primero.
+- **`ROWS_PER_PAGE` era un número fijo y estaba mal.** Veintiséis filas solo caben
+  si la letra es pequeña; con el anexo de flujos —treinta filas— la tabla se
+  salía por debajo de la hoja, tapando la nota al pie. Ahora lo deriva
+  `_rows_that_fit` del cuerpo de letra de cada página.
+- **Las notas al pie de las páginas de tabla no se cortaban por palabras** y se
+  salían por el borde derecho. `_footnote` las envuelve y las apila hacia arriba,
+  como ya hacían las de las páginas de gráfico.
+- Las dos mitades de un flujo porcentual se registran por separado
+  (`_rate_schedules`): un año con un aporte del 3% y un retiro del 4% no es lo
+  mismo que un año con un retiro del 1%, aunque el patrimonio termine igual. El
+  motor sigue aplicando el neto, y sobre una base que se fija antes de tocar
+  nada las dos formas dan idéntico resultado.
+- **Revisión visual del PDF antes de cerrar**: fue la que encontró el desborde de
+  la retícula, el desborde de la tabla de treinta filas y la nota al pie cortada.
+  Ningún test los veía.
+
 ## Sesión 13 — 22 sep 2026
 
 Los supuestos resumen pasan del anexo al cuerpo.
