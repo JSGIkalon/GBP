@@ -198,7 +198,7 @@ def test_custom_pairs_solo_devuelve_los_propios():
             _propio("Renta Fija Colombiana", FIXED_INCOME),
         ]
     )
-    assert custom_pairs(cmas) == [("Renta Fija Colombiana", FIXED_INCOME)]
+    assert custom_pairs(cmas) == [("Renta Fija Colombiana", FIXED_INCOME, None)]
 
 
 def test_el_resolvedor_conoce_la_clase_declarada(base):
@@ -234,3 +234,57 @@ def test_una_clase_del_ltcma_no_guarda_clase_declarada():
     a = AssetClass("U.S. Large Cap", 0.07, 0.16, asset_class=EQUITY)
     assert a.asset_class is None
     assert not a.is_custom
+
+
+def test_una_clase_del_ltcma_no_guarda_fuente_de_correlacion():
+    a = AssetClass(
+        "U.S. Large Cap", 0.07, 0.16, asset_class=EQUITY,
+        correlation_source="U.S. Cash",
+    )
+    assert a.correlation_source is None
+
+
+# --------------------------------------------------------------------------
+# Anclar a un solo activo de la librería, en vez del promedio de la clase
+# --------------------------------------------------------------------------
+
+
+def test_anclar_a_un_activo_reproduce_su_fila_con_tope(base):
+    row, lam = class_loading(base, FIXED_INCOME, "U.S. Cash")
+    assert lam == pytest.approx(np.sqrt(CORRELATION_CAP))
+    esperado = base.matrix[base.names.index("U.S. Cash"), :] * lam
+    np.testing.assert_allclose(row, esperado)
+
+
+def test_la_matriz_extendida_con_fuente_puntual_es_psd(base):
+    ext = extend_correlations(
+        base, [("Renta Fija Colombiana", FIXED_INCOME, "U.S. Cash")]
+    )
+    assert is_psd(ext.matrix)
+    i, j = ext.names.index("Renta Fija Colombiana"), ext.names.index("U.S. Cash")
+    assert ext.matrix[i, j] == pytest.approx(np.sqrt(CORRELATION_CAP), abs=1e-6)
+
+
+def test_la_fuente_puntual_no_es_el_promedio_de_la_clase(base):
+    row_clase, _ = class_loading(base, FIXED_INCOME)
+    row_fuente, _ = class_loading(base, FIXED_INCOME, "U.S. Cash")
+    assert not np.allclose(row_clase, row_fuente)
+
+
+def test_una_fuente_de_correlacion_inexistente_levanta_error(base):
+    with pytest.raises(ValueError, match="no está en la matriz de correlación base"):
+        extend_correlations(
+            base, [("Renta Fija Colombiana", FIXED_INCOME, "Activo que no existe")]
+        )
+
+
+def test_custom_pairs_incluye_la_fuente_de_correlacion():
+    cmas = CMASet(
+        [AssetClass(
+            "Renta Fija Colombiana", 0.10, 0.02, origin=ORIGIN_CUSTOM,
+            asset_class=FIXED_INCOME, correlation_source="U.S. Cash",
+        )]
+    )
+    assert custom_pairs(cmas) == [
+        ("Renta Fija Colombiana", FIXED_INCOME, "U.S. Cash")
+    ]

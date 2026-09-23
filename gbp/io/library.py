@@ -110,6 +110,7 @@ def asset_from_dict(entry: dict) -> AssetClass:
         yield_=float(entry.get("yield_", entry.get("yield", 0.0))),
         origin=origin,
         asset_class=asset_class,
+        correlation_source=entry.get("correlation_source"),
         notes=str(entry.get("notes", "")),
     )
 
@@ -131,6 +132,8 @@ def asset_to_dict(asset: AssetClass, with_origin: bool = True) -> dict:
         payload["origin"] = asset.origin
     if asset.is_custom:
         payload["asset_class"] = asset.asset_class
+        if asset.correlation_source:
+            payload["correlation_source"] = asset.correlation_source
     if asset.notes:
         payload["notes"] = asset.notes
     return payload

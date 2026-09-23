@@ -998,16 +998,22 @@ def _write_custom_assets(col: _Column, propios: list):
     col.title("Supuestos declarados por el analista")
     col.write(
         "Estas clases de activo no están en el LTCMA: sus supuestos los fijó quien "
-        "preparó este informe, y sus correlaciones se derivan del promedio de la "
-        "clase de activo indicada. Los valores están en dólares.",
+        "preparó este informe. Sus correlaciones se derivan del promedio de la "
+        "clase de activo indicada, salvo que el activo esté anclado a uno solo "
+        "de la librería, como se indica abajo. Los valores están en dólares.",
         color=INK_SOFT, indent=0.0,
     )
     col.gap(0.02)
     for asset in propios:
         col.heading(asset.name.upper(), swatch=NAVY)
+        correlacion = (
+            f"anclada a '{asset.correlation_source}'" if asset.correlation_source
+            else f"promedio de {asset.asset_class}"
+        )
         col.write(
             f"Clase: {asset.asset_class} · retorno compuesto {asset.compound_return:.2%}"
             f" · volatilidad {asset.volatility:.2%} · yield {asset.yield_:.2%}"
+            f" · correlación: {correlacion}"
         )
         if asset.notes:
             col.write(f"Notas: {asset.notes}", color=INK_SOFT)

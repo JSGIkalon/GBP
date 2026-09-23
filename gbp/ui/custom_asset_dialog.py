@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QRadioButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -57,10 +59,19 @@ class CustomAssetDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
+        # Se crea temprano, sin agregarla al layout todavía: los radios de
+        # correlación disparan `_update_preview` en cuanto se marcan (más
+        # abajo), y eso pasa antes de llegar al punto del layout donde el
+        # texto de vista previa vive visualmente.
+        self.preview = QLabel("")
+        self.preview.setWordWrap(True)
+        self.preview.setStyleSheet(f"color: {INK_SOFT};")
+
         intro = QLabel(
             "Un activo propio sirve para patrimonio que el LTCMA no cubre. Tú fijas "
             "el retorno y la volatilidad; la app deriva las correlaciones del "
-            "promedio de la clase que elijas."
+            "promedio de la clase que elijas, o de un solo activo de la librería "
+            "si prefieres anclarlo a algo más parecido."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -72,8 +83,6 @@ class CustomAssetDialog(QDialog):
         self.name.setPlaceholderText("Renta Fija Colombiana")
         form.addRow("Nombre", self.name)
 
-        from PySide6.QtWidgets import QComboBox
-
         self.asset_class = QComboBox()
         self.asset_class.addItems(GROUP_ORDER)
         if asset and asset.asset_class:
@@ -82,6 +91,34 @@ class CustomAssetDialog(QDialog):
         form.addRow("Clase de activo", self.asset_class)
 
         layout.addLayout(form)
+
+        correlation_box = QVBoxLayout()
+        correlation_box.addWidget(QLabel("Correlación"))
+
+        self.source_average = QRadioButton("Promedio de la clase de activo")
+        self.source_single = QRadioButton("Un activo específico de la librería")
+        self.source_average.setChecked(True)
+        self.source_average.toggled.connect(self._update_preview)
+        correlation_box.addWidget(self.source_average)
+
+        single_row = QHBoxLayout()
+        single_row.addWidget(self.source_single)
+        self.source_asset = QComboBox()
+        self.source_asset.addItems(sorted(base_correlations.names))
+        self.source_asset.setEnabled(False)
+        self.source_asset.currentTextChanged.connect(self._update_preview)
+        single_row.addWidget(self.source_asset, 1)
+        correlation_box.addLayout(single_row)
+        self.source_single.toggled.connect(self.source_asset.setEnabled)
+        self.source_single.toggled.connect(self._update_preview)
+
+        if asset and asset.correlation_source:
+            self.source_single.setChecked(True)
+            self.source_asset.setEnabled(True)
+            if asset.correlation_source in base_correlations.names:
+                self.source_asset.setCurrentText(asset.correlation_source)
+
+        layout.addLayout(correlation_box)
 
         warning = QLabel(CURRENCY_WARNING)
         warning.setWordWrap(True)
@@ -113,9 +150,6 @@ class CustomAssetDialog(QDialog):
         layout.addWidget(QLabel("Notas"))
         layout.addWidget(self.notes)
 
-        self.preview = QLabel("")
-        self.preview.setWordWrap(True)
-        self.preview.setStyleSheet(f"color: {INK_SOFT};")
         layout.addWidget(self.preview)
 
         buttons = QDialogButtonBox(
@@ -137,16 +171,22 @@ class CustomAssetDialog(QDialog):
         box.setSingleStep(0.25)
         return box
 
+    def _correlation_source(self) -> str | None:
+        if self.source_single.isChecked() and self.source_asset.currentText():
+            return self.source_asset.currentText()
+        return None
+
     def _update_preview(self, *_):
         """Lo que la app va a derivar, dicho antes de aceptar.
 
-        Sin esto, elegir una clase es una caja negra y el analista no puede
-        saber con qué está simulando en realidad.
+        Sin esto, elegir una clase (o un activo puntual) es una caja negra y el
+        analista no puede saber con qué está simulando en realidad.
         """
         try:
             self.preview.setText(
                 derived_preview(
-                    self.base, self.asset_class.currentText(), PREVIEW_AGAINST
+                    self.base, self.asset_class.currentText(),
+                    self._correlation_source(), PREVIEW_AGAINST,
                 )
             )
         except ValueError as exc:
@@ -190,6 +230,7 @@ class CustomAssetDialog(QDialog):
             yield_=self.yield_.value() / 100.0,
             origin=ORIGIN_CUSTOM,
             asset_class=self.asset_class.currentText(),
+            correlation_source=self._correlation_source(),
             notes=self.notes.toPlainText().strip(),
         )
 
@@ -205,6 +246,7 @@ def _same(a: AssetClass, b: AssetClass) -> bool:
         and abs(a.volatility - b.volatility) < 1e-9
         and abs(a.yield_ - b.yield_) < 1e-9
         and a.asset_class == b.asset_class
+        and a.correlation_source == b.correlation_source
     )
 
 
@@ -357,6 +399,7 @@ def merge_custom_assets(parent, cmas: CMASet, del_caso: list[AssetClass]) -> lis
                 existente.volatility = del_caso_asset.volatility
                 existente.yield_ = del_caso_asset.yield_
                 existente.asset_class = del_caso_asset.asset_class
+                existente.correlation_source = del_caso_asset.correlation_source
             if dialog.choice == ConflictDialog.ADOPTAR:
                 from ..io import library
 

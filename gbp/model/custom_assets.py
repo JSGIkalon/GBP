@@ -8,13 +8,20 @@ completa y por tanto todo activo necesita su fila y su columna.
 
 El principio
 ------------
-    Un activo propio se comporta como **el promedio de su clase de activo**,
-    más su propio riesgo idiosincrático, con el retorno y la volatilidad que
-    el analista fija.
+    Un activo propio se comporta como **el promedio de su clase de activo**
+    —o, si el analista lo prefiere, como **un solo activo del LTCMA** que ya
+    está en la librería—, más su propio riesgo idiosincrático, con el retorno
+    y la volatilidad que el analista fija.
 
 De ese único enunciado salen las dos cosas que el activo necesita y que nadie
 escribe: sus correlaciones (aquí) y su grupo en la vista agrupada
 (`gbp.model.groups`).
+
+Anclar a un solo activo en vez de al promedio de la clase es el mismo cálculo
+con una lista de "miembros" de un solo elemento: matemáticamente es idéntico
+al caso degenerado de una clase con un único miembro (ver más abajo, "Caja"),
+así que reutiliza el mismo tope `CORRELATION_CAP` sin necesidad de un caso
+aparte.
 
 Por qué la matriz extendida es válida
 -------------------------------------
@@ -60,9 +67,13 @@ from .groups import ClassResolver, ltcma_members
 CORRELATION_CAP = 0.95
 
 
-def custom_pairs(cmas: CMASet) -> list[tuple[str, str]]:
-    """Los activos propios de la librería como `(nombre, clase declarada)`."""
-    return [(a.name, a.asset_class) for a in cmas.custom]
+def custom_pairs(cmas: CMASet) -> list[tuple[str, str, str | None]]:
+    """Los activos propios de la librería como
+
+    `(nombre, clase declarada, fuente de correlación)`. La fuente es `None`
+    cuando el activo deriva del promedio de su clase.
+    """
+    return [(a.name, a.asset_class, a.correlation_source) for a in cmas.custom]
 
 
 def resolver_for(cmas: CMASet, base: CorrelationMatrix) -> ClassResolver:
@@ -70,21 +81,47 @@ def resolver_for(cmas: CMASet, base: CorrelationMatrix) -> ClassResolver:
     return ClassResolver.from_library(cmas, base.names)
 
 
-def class_loading(
-    base: CorrelationMatrix, asset_class: str, cap: float = CORRELATION_CAP
-) -> tuple[np.ndarray, float]:
-    """Fila de correlaciones de un activo propio contra la base, y su λ.
+def _members(
+    base: CorrelationMatrix, asset_class: str, correlation_source: str | None
+) -> tuple[str, ...]:
+    """Los nombres del LTCMA de los que se deriva la correlación.
 
-    La fila ya viene escalada por λ. Devolver λ aparte sirve para el bloque
-    entre activos propios y para poder explicarlo en la interfaz.
+    Con `correlation_source`, un único activo elegido de la librería. Sin él,
+    todos los miembros de la clase declarada —el comportamiento por defecto.
     """
+    if correlation_source is not None:
+        if correlation_source not in base.names:
+            raise ValueError(
+                f"'{correlation_source}' no está en la matriz de correlación base; "
+                "no se puede anclar un activo propio a algo que no existe en la "
+                "librería del LTCMA."
+            )
+        return (correlation_source,)
+
     members = ltcma_members(base.names).get(asset_class, ())
     if not members:
         raise ValueError(
             f"La clase '{asset_class}' no tiene ninguna clase del LTCMA de la que "
             "derivar correlaciones."
         )
+    return members
 
+
+def class_loading(
+    base: CorrelationMatrix,
+    asset_class: str,
+    correlation_source: str | None = None,
+    cap: float = CORRELATION_CAP,
+) -> tuple[np.ndarray, float]:
+    """Fila de correlaciones de un activo propio contra la base, y su λ.
+
+    La fila ya viene escalada por λ. Devolver λ aparte sirve para el bloque
+    entre activos propios y para poder explicarlo en la interfaz.
+
+    Con `correlation_source`, los "miembros" son un único activo elegido de la
+    librería en vez del promedio de toda la clase — ver `_members`.
+    """
+    members = _members(base, asset_class, correlation_source)
     idx = [base.names.index(n) for n in members]
     # El promedio del bloque incluye los términos g == h, que valen 1. Es lo que
     # hace que el resultado sea exactamente var(p) y, con ello, que la
@@ -99,10 +136,16 @@ def class_loading(
 
 def extend_correlations(
     base: CorrelationMatrix,
-    custom: Sequence[tuple[str, str]],
+    custom: Sequence[tuple[str, str] | tuple[str, str, str | None]],
     cap: float = CORRELATION_CAP,
 ) -> CorrelationMatrix:
     """Matriz con los activos propios añadidos al final, en el orden dado.
+
+    Cada entrada de `custom` es `(nombre, clase declarada)` o `(nombre, clase
+    declarada, fuente de correlación)`; la tupla de dos se admite por
+    compatibilidad y equivale a fuente `None`. La fuente es `None` para
+    derivar del promedio de la clase, o el nombre de un activo del LTCMA para
+    anclarse a ese único activo (ver `_members`).
 
     PSD por construcción: es la correlación de un vector aleatorio realizable.
     No pasa por `nearest_psd` a propósito.
@@ -110,7 +153,8 @@ def extend_correlations(
     if not custom:
         return base  # es frozen, devolverla tal cual es seguro
 
-    nombres = [n for n, _ in custom]
+    custom = [(t[0], t[1], t[2] if len(t) > 2 else None) for t in custom]
+    nombres = [n for n, _, _ in custom]
     repetidos = {n for n in nombres if nombres.count(n) > 1}
     if repetidos:
         raise ValueError(f"Activos propios duplicados: {sorted(repetidos)}")
@@ -128,28 +172,29 @@ def extend_correlations(
 
     filas: list[np.ndarray] = []
     lambdas: list[float] = []
-    for _, asset_class in custom:
-        row, lam = class_loading(base, asset_class, cap)
+    miembros: list[list[int]] = []
+    for _, asset_class, correlation_source in custom:
+        row, lam = class_loading(base, asset_class, correlation_source, cap)
         filas.append(row)
         lambdas.append(lam)
+        miembros.append(
+            [base.names.index(x) for x in _members(base, asset_class, correlation_source)]
+        )
 
     for i, row in enumerate(filas):
         extended[n + i, :n] = row
         extended[:n, n + i] = row
 
-    # Entre dos activos propios: λ_i · λ_j · promedio cruzado de sus clases.
-    # Si comparten clase eso da λ² · var(p), que es exactamente cov(p, p) del
-    # mismo portafolio — es decir, dos activos propios de la misma clase se
-    # parecen mucho, pero nunca son el mismo activo.
-    indices = {
-        c: [base.names.index(x) for x in ltcma_members(base.names).get(c, ())]
-        for _, c in custom
-    }
-    for i, (_, ci) in enumerate(custom):
-        for j, (_, cj) in enumerate(custom):
+    # Entre dos activos propios: λ_i · λ_j · promedio cruzado de sus miembros
+    # (la clase entera, o el único activo elegido como fuente). Si los dos
+    # promedian la misma clase eso da λ² · var(p), que es exactamente cov(p, p)
+    # del mismo portafolio — es decir, dos activos propios de la misma clase
+    # se parecen mucho, pero nunca son el mismo activo.
+    for i in range(k):
+        for j in range(k):
             if i == j:
                 continue
-            cruzado = float(base.matrix[np.ix_(indices[ci], indices[cj])].mean())
+            cruzado = float(base.matrix[np.ix_(miembros[i], miembros[j])].mean())
             extended[n + i, n + j] = lambdas[i] * lambdas[j] * cruzado
 
     np.fill_diagonal(extended, 1.0)
@@ -166,16 +211,17 @@ def extend_correlations(
 def derived_preview(
     base: CorrelationMatrix,
     asset_class: str,
+    correlation_source: str | None = None,
     against: Sequence[str] = (),
     cap: float = CORRELATION_CAP,
 ) -> str:
     """Frase que explica en la interfaz lo que la app va a derivar.
 
-    Sin esto, elegir una clase es una caja negra: el analista no tiene forma de
-    saber con qué está simulando en realidad.
+    Sin esto, elegir una clase (o un activo puntual) es una caja negra: el
+    analista no tiene forma de saber con qué está simulando en realidad.
     """
-    row, lam = class_loading(base, asset_class, cap)
-    members = ltcma_members(base.names).get(asset_class, ())
+    row, lam = class_loading(base, asset_class, correlation_source, cap)
+    members = _members(base, asset_class, correlation_source)
     var_p = lam**2 * float(
         base.matrix[
             np.ix_(
@@ -185,18 +231,27 @@ def derived_preview(
         ].mean()
     )
 
-    partes = [
-        f"Se comportará como el promedio de {asset_class} "
-        f"({len(members)} clases del LTCMA)."
-    ]
+    if correlation_source is not None:
+        partes = [f"Se comportará como '{correlation_source}'."]
+    else:
+        partes = [
+            f"Se comportará como el promedio de {asset_class} "
+            f"({len(members)} clases del LTCMA)."
+        ]
     muestras = [n for n in against if n in base.names]
     if muestras:
         detalle = " · ".join(
             f"{n} {row[base.names.index(n)]:.2f}" for n in muestras
         )
         partes.append(f"Correlación derivada: {detalle}.")
+    if correlation_source is not None:
+        fuente = f"'{correlation_source}'"
+        otros = f"otro activo propio anclado también a {fuente}"
+    else:
+        fuente = "la clase"
+        otros = "otro activo propio de esta clase"
     partes.append(
-        f"Riesgo propio no explicado por la clase: {1 - var_p:.0%}. "
-        f"Dos activos propios de esta clase quedan correlacionados al {var_p:.2f}."
+        f"Riesgo propio no explicado por {fuente}: {1 - var_p:.0%}. "
+        f"Con {otros} quedaría correlacionado al {var_p:.2f}."
     )
     return " ".join(partes)

@@ -184,8 +184,12 @@ class AssetsPanel(QWidget):
             fondo = QBrush(QColor(NEUTRAL))
             for item in (name_item, origen, clase):
                 item.setBackground(fondo)
-            if asset.notes:
-                name_item.setToolTip(asset.notes)
+            tooltip = asset.notes
+            if asset.correlation_source:
+                fuente = f"Correlación: réplica de '{asset.correlation_source}'."
+                tooltip = f"{tooltip}\n{fuente}" if tooltip else fuente
+            if tooltip:
+                name_item.setToolTip(tooltip)
 
         self.table.setItem(row, 0, name_item)
         self.table.setItem(row, 1, origen)
@@ -260,6 +264,7 @@ class AssetsPanel(QWidget):
         asset.volatility = actualizado.volatility
         asset.yield_ = actualizado.yield_
         asset.asset_class = actualizado.asset_class
+        asset.correlation_source = actualizado.correlation_source
         asset.notes = actualizado.notes
 
         self.reload(self.cmas)

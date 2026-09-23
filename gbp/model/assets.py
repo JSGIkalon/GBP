@@ -41,6 +41,15 @@ class AssetClass:
     colombiana— declara además a qué clase de activo pertenece. Esa declaración
     es la que permite derivarle correlaciones, porque no las tiene publicadas:
     ver `gbp.model.custom_assets`.
+
+    Por defecto la correlación se deriva del **promedio de la clase**
+    (`correlation_source is None`). El analista puede en cambio anclarla a
+    **un solo activo del LTCMA** que ya está en la librería —por ejemplo, que
+    un CDT en pesos replique a `U.S. Short Duration Government/Credit` en vez
+    del promedio de toda la renta fija—, escribiendo su nombre en
+    `correlation_source`. `asset_class` sigue siendo obligatoria en ese caso:
+    determina el grupo en las vistas agrupadas aunque la correlación venga de
+    otro lado.
     """
 
     name: str
@@ -49,6 +58,7 @@ class AssetClass:
     yield_: float = 0.0
     origin: str = ORIGIN_LTCMA
     asset_class: str | None = None
+    correlation_source: str | None = None
     notes: str = ""
 
     def __post_init__(self) -> None:
@@ -82,10 +92,15 @@ class AssetClass:
                     f"{self.name}: un activo propio debe declarar su clase de activo, "
                     f"una de {GROUP_ORDER}; llegó {self.asset_class!r}."
                 )
+            if self.correlation_source is not None and not self.correlation_source.strip():
+                self.correlation_source = None
         else:
             # La clase de una clase del LTCMA se deduce de su nombre; guardarla
-            # abriría la puerta a que las dos fuentes se contradigan.
+            # abriría la puerta a que las dos fuentes se contradigan. Lo mismo
+            # para la fuente de correlación: solo tiene sentido para un activo
+            # propio.
             self.asset_class = None
+            self.correlation_source = None
 
     @property
     def is_custom(self) -> bool:

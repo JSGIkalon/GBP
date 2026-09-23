@@ -69,6 +69,24 @@ def test_guardar_y_cargar_conserva_origen_y_clase():
     assert not recargada.by_name("U.S. Large Cap").is_custom
 
 
+def test_guardar_y_cargar_conserva_la_fuente_de_correlacion():
+    cmas = library.seed_cmas()
+    cmas.add(AssetClass(
+        **{**COLOMBIA, "correlation_source": "U.S. Short Duration Government/Credit"}
+    ))
+    library.save_cmas(cmas)
+
+    recargada = library.load_cmas()
+    propio = recargada.by_name("Renta Fija Colombiana")
+    assert propio.correlation_source == "U.S. Short Duration Government/Credit"
+
+    # Un activo propio sin fuente puntual sigue sin escribir la llave, para que
+    # una librería sin este campo quede byte a byte la de siempre.
+    otro = library.seed_cmas()
+    otro.add(AssetClass(**COLOMBIA))
+    assert "correlation_source" not in library.asset_to_dict(otro.by_name("Renta Fija Colombiana"))
+
+
 def test_una_libreria_de_esquema_2_carga_como_ltcma(tmp_path):
     import json
 
@@ -159,6 +177,20 @@ def test_ida_y_vuelta_de_un_caso_con_activos_propios(tmp_path):
     assert propios[0].is_custom
     assert propios[0].asset_class == FIXED_INCOME
     assert propios[0].compound_return == pytest.approx(0.058)
+
+
+def test_ida_y_vuelta_de_un_caso_conserva_la_fuente_de_correlacion(tmp_path):
+    cmas = library.seed_cmas()
+    cmas.add(AssetClass(
+        **{**COLOMBIA, "correlation_source": "U.S. Short Duration Government/Credit"}
+    ))
+    path = tmp_path / "caso.gbp.json"
+
+    save_case(_escenario_mixto(), path, cmas)
+    payload = read_case(path)
+    propios = custom_assets_from_dict(payload)
+
+    assert propios[0].correlation_source == "U.S. Short Duration Government/Credit"
 
 
 def test_un_caso_sin_activos_propios_no_escribe_la_llave(tmp_path):
