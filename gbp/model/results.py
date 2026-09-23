@@ -154,6 +154,23 @@ class StrategyResult:
             retiros = retiros / self.inflation_factors
         return {"aportes": aportes, "retiros": retiros, "neto": aportes - retiros}
 
+    def flow_value_series(self) -> dict[str, np.ndarray]:
+        """Flujos netos y valor de portafolio mediano, año por año.
+
+        Junta lo que hace falta para la tabla de "flujos y valor de portafolio"
+        que se muestra tanto en la app como en el informe: el flujo neto
+        nominal, su acumulado, y el patrimonio neto mediano en las dos
+        unidades. Vive aquí y no en la UI ni en el informe porque los dos la
+        necesitan igual.
+        """
+        neto = self.flow_history()["neto"]
+        return {
+            "neto": neto,
+            "acumulado": np.cumsum(neto),
+            "valor_nominal": np.median(self.values(False), axis=0),
+            "valor_real": np.median(self.values(True), axis=0),
+        }
+
 
 @dataclass
 class SimulationResult:

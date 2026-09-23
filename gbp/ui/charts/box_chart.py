@@ -33,7 +33,10 @@ from ..theme import (
 MIN_WIDTH_FOR_LABELS = 0.030
 
 
-def draw_box_chart(canvas, result: SimulationResult, years: list[int], real: bool = False):
+def draw_box_chart(
+    canvas, result: SimulationResult, years: list[int], real: bool = False,
+    show_percentile_labels: bool = True,
+):
     if not result or not years:
         canvas.show_message("Corre la simulación para ver la distribución.")
         return
@@ -112,7 +115,7 @@ def draw_box_chart(canvas, result: SimulationResult, years: list[int], real: boo
     # para que sus cuartiles no se encabalguen con la mediana.
     span = float(np.ptp(ax.get_ylim())) or 1.0
     for pos, stat, on_fill, fill in boxes_to_label:
-        _label_box(ax, pos, stat, on_fill, fill, label_all, span)
+        _label_box(ax, pos, stat, on_fill, fill, label_all and show_percentile_labels, span)
 
     if n_strategies >= 2:
         # Sin `mode="expand"`: estiraba las entradas a los extremos opuestos del
@@ -135,7 +138,7 @@ def draw_box_chart(canvas, result: SimulationResult, years: list[int], real: boo
     # de página del PDF, aterrizaba justo encima del pie de página —el título y
     # la fecha impresos por `_new_page`— y los dos textos se superponían.
     footnote = "Caja: percentil 25 a 75 · Línea vertical: percentil 10 a 90 · Etiqueta: mediana"
-    if not label_all:
+    if not (label_all and show_percentile_labels):
         footnote += " — solo se etiqueta la mediana; el resto está en la tabla"
     ax.set_xlabel(footnote, fontsize=8, color=INK_SOFT, loc="left", labelpad=10)
 

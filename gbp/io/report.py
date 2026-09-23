@@ -1271,19 +1271,16 @@ def _flows_table(result: SimulationResult) -> _AnnexTable | None:
         serie = strategy.flow_history()
         if not (serie["aportes"].any() or serie["retiros"].any()):
             continue
-        neto = serie["neto"]
-        acumulado = np.cumsum(neto)
-        valor_nominal = np.median(strategy.values(False), axis=0)
-        valor_real = np.median(strategy.values(True), axis=0)
+        valores = strategy.flow_value_series()
         bloques.append((
             strategy.name,
             [
                 [
                     str(year),
-                    format_money(float(neto[year - 1])),
-                    format_money(float(acumulado[year - 1])),
-                    format_money(float(valor_nominal[year - 1])),
-                    format_money(float(valor_real[year - 1])),
+                    format_money(float(valores["neto"][year - 1])),
+                    format_money(float(valores["acumulado"][year - 1])),
+                    format_money(float(valores["valor_nominal"][year - 1])),
+                    format_money(float(valores["valor_real"][year - 1])),
                 ]
                 for year in range(1, strategy.horizon + 1)
             ],

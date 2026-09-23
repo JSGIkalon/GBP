@@ -17,6 +17,8 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
+    QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -68,6 +70,11 @@ class ResultsPanel(QTabWidget):
         super().__init__(parent)
         self.result: SimulationResult | None = None
         self.settings = SimulationSettings()
+        self.years: list[int] = []
+        # Los percentiles p10/p25/p75/p90 se pueden ocultar del gráfico: la
+        # mediana es la cifra que importa y las demás siempre están en la
+        # tabla de abajo, así que ocultarlas despeja la caja sin perder nada.
+        self.show_percentile_labels = True
 
         # --- Distribución, en las dos unidades ---------------------------
         self.range_columns = [
@@ -82,6 +89,31 @@ class ResultsPanel(QTabWidget):
             "Valores en moneda de hoy, descontados a la inflación del escenario: "
             "lo que ese patrimonio podría comprar hoy.",
         )
+
+        # --- Flujos y valor de portafolio ---------------------------------
+        flows = QWidget()
+        f_layout = QVBoxLayout(flows)
+        selector_row = QHBoxLayout()
+        selector_row.addWidget(QLabel("Portafolio:"))
+        self.flows_selector = QComboBox()
+        self.flows_selector.currentIndexChanged.connect(self._show_flows)
+        selector_row.addWidget(self.flows_selector, 1)
+        f_layout.addLayout(selector_row)
+        self.flow_columns = [
+            "Año", "Flujos netos", "Flujos netos acumulados",
+            "Valor portafolio", "Valor portafolio (moneda de hoy)",
+        ]
+        self.flows_table = _table(self.flow_columns)
+        f_layout.addWidget(self.flows_table, 1)
+        flows_note = QLabel(
+            "Flujos netos: aportes menos retiros, medianos sobre los caminos simulados. "
+            "Valor portafolio: patrimonio neto mediano al cierre de cada año, en "
+            "valores nominales y en moneda de hoy."
+        )
+        flows_note.setWordWrap(True)
+        flows_note.setStyleSheet("color: #5B7280;")
+        f_layout.addWidget(flows_note)
+        self.addTab(flows, "Flujos y valor")
 
         # --- Supuestos --------------------------------------------------
         summary = QWidget()
@@ -152,6 +184,10 @@ class ResultsPanel(QTabWidget):
         layout = QVBoxLayout(page)
         canvas = ChartCanvas(height=4.6)
         layout.addWidget(canvas, 3)
+        toggle = QCheckBox("Mostrar percentiles p10/p25/p75/p90 en el gráfico")
+        toggle.setChecked(True)
+        toggle.toggled.connect(self._toggle_percentile_labels)
+        layout.addWidget(toggle)
         table = _table(self.range_columns)
         layout.addWidget(table, 2)
         label = QLabel(note)
@@ -161,13 +197,33 @@ class ResultsPanel(QTabWidget):
         self.addTab(page, title)
         return canvas, table
 
+    def _toggle_percentile_labels(self, checked: bool):
+        """Un solo interruptor para las dos unidades: es la misma preferencia de lectura."""
+        self.show_percentile_labels = checked
+        for checkbox in self.findChildren(QCheckBox):
+            checkbox.blockSignals(True)
+            checkbox.setChecked(checked)
+            checkbox.blockSignals(False)
+        if self.result is not None:
+            self._draw_distributions()
+
+    def _draw_distributions(self):
+        for canvas, real in ((self.box_canvas, False), (self.real_canvas, True)):
+            draw_box_chart(
+                canvas, self.result, self.years, real,
+                show_percentile_labels=self.show_percentile_labels,
+            )
+
     def clear(self):
         self.result = None
+        self.years = []
         for canvas in (self.box_canvas, self.real_canvas, self.debt_canvas):
             canvas.show_message(EMPTY)
         self.headline.setText(EMPTY)
-        for table in (self.range_table, self.real_table, self.summary_table, self.debt_table):
+        for table in (self.range_table, self.real_table, self.summary_table, self.debt_table,
+                      self.flows_table):
             table.setRowCount(0)
+        self.flows_selector.clear()
 
     def show_allocation(self, scenario: Scenario, resolver=None):
         """La asignación no depende de la simulación: se ve sin haberla corrido.
@@ -185,17 +241,43 @@ class ResultsPanel(QTabWidget):
     def show_result(self, result: SimulationResult, settings: SimulationSettings, horizon: int):
         self.result = result
         self.settings = settings
-        years = settings.milestones_within(horizon)
+        self.years = settings.milestones_within(horizon)
 
-        for canvas, table, real in (
-            (self.box_canvas, self.range_table, False),
-            (self.real_canvas, self.real_table, True),
-        ):
-            draw_box_chart(canvas, result, years, real)
-            _fill(table, distribution_table_rows(result, years, real), self.range_columns)
+        self._draw_distributions()
+        for table, real in ((self.range_table, False), (self.real_table, True)):
+            _fill(table, distribution_table_rows(result, self.years, real), self.range_columns)
 
         self._show_summary(result)
         self._show_debt(result)
+        self._show_flows_selector(result)
+
+    # ------------------------------------------------------------------
+    def _show_flows_selector(self, result: SimulationResult):
+        self.flows_selector.blockSignals(True)
+        self.flows_selector.clear()
+        self.flows_selector.addItems(result.names)
+        self.flows_selector.blockSignals(False)
+        self._show_flows(0)
+
+    def _show_flows(self, index: int):
+        if self.result is None or index < 0 or index >= len(self.result.strategies):
+            self.flows_table.setRowCount(0)
+            return
+        strategy = self.result.strategies[index]
+        valores = strategy.flow_value_series()
+        rows = [
+            {
+                "Año": year,
+                "Flujos netos": format_money(float(valores["neto"][year - 1])),
+                "Flujos netos acumulados": format_money(float(valores["acumulado"][year - 1])),
+                "Valor portafolio": format_money(float(valores["valor_nominal"][year - 1])),
+                "Valor portafolio (moneda de hoy)": format_money(
+                    float(valores["valor_real"][year - 1])
+                ),
+            }
+            for year in range(1, strategy.horizon + 1)
+        ]
+        _fill(self.flows_table, rows, self.flow_columns)
 
     # ------------------------------------------------------------------
     def _show_summary(self, result: SimulationResult, real: bool = False):
