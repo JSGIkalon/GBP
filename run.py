@@ -21,6 +21,10 @@ def main() -> int:
 
     window = MainWindow()
     window.show()
+    # Windows pasa la ruta del caso cuando se abre con «Abrir con → GBP». Se
+    # carga después de mostrar la ventana para que un error salga sobre ella.
+    if len(sys.argv) > 1:
+        window.open_case_path(sys.argv[1])
     return app.exec()
 
 

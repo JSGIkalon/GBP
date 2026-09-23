@@ -30,9 +30,12 @@ documento cubre la arquitectura y las decisiones de ingeniería.
 | 9 | Activos propios: patrimonio fuera del universo del LTCMA | **Completa** |
 | 10 | Informe con anexo de tablas, lámina de asignación de activos, retiro del stress test | **Completa** |
 
-**La aplicación está terminada y funcionando.** 158 tests en verde y `dist\GBP.exe`
-(81.3 MB) verificado con `tools/packaging_check.py` congelado: recursos
-embebidos, persistencia en `%APPDATA%`, motor, interfaz e informe PDF.
+| 16 | Instalador (Inno Setup) en vez de .exe portable | **Completa** |
+
+**La aplicación está terminada y funcionando.** 184 tests en verde. Se entrega
+como instalador, `dist\GBP-Setup-<versión>.exe` (57 MB), y `tools/packaging_check.py`
+congelado verifica los recursos embebidos, la persistencia en `%APPDATA%`, el
+motor, la interfaz y el informe PDF.
 
 ## Cómo correrlo
 
@@ -42,7 +45,7 @@ py -m venv .venv
 
 .\.venv\Scripts\python.exe run.py                       # abre la aplicación
 .\.venv\Scripts\python.exe -m pytest tests\ -q          # 158 tests
-.\tools\build_exe.ps1                                   # genera dist\GBP.exe
+.\tools\build_exe.ps1                                   # genera el instalador en dist\
 
 $env:PYTHONPATH="."; .\.venv\Scripts\python.exe tools\smoke_pdf_case.py
 .\.venv\Scripts\python.exe tools\screenshot.py          # capturas para revisar maqueta
@@ -78,7 +81,8 @@ mercado nunca se guardan ahí: quedan en la librería global.
 
 ## Decisiones tomadas
 
-- **Escritorio nativo** (PySide6), empaquetado final como **.exe portable** (sin instalador).
+- **Escritorio nativo** (PySide6), distribuido con **instalador por usuario**
+  (Inno Setup, sin pedir administrador). Hasta la sesión 15 fue un .exe portable.
 - **Motor multiactivo con correlaciones**, paso **anual**, valores nominales con vista en términos reales.
 - **Sin buckets de metas**: una sola proyección de portafolio, con varias estrategias comparables.
 - **Pre-tax** en v1. El motor no aplica impuestos; el hook queda para una sesión posterior.
@@ -460,15 +464,38 @@ escenario, que cerraría buena parte de la diferencia.
   conserva los valores publicados y la reparación ocurre al cargar; el ajuste
   máximo es de 0.008, es decir cosmético.
 
-## Empaquetado a .exe
+## Empaquetado e instalador
 
 ```powershell
-.\tools\build_exe.ps1     # -> dist\GBP.exe (81.3 MB, portable)
+.\tools\build_exe.ps1     # -> dist\GBP\ (la app) y dist\GBP-Setup-<versión>.exe (57 MB)
 ```
 
-Es portable: se copia donde sea y se ejecuta, sin instalación. Guarda los
-supuestos en `%APPDATA%\Ikalon\GBP`, así que reemplazar el .exe por una versión
-nueva no pierde nada de lo que el usuario haya cargado.
+Hace falta **Inno Setup 6** (`winget install JRSoftware.InnoSetup`). El script
+empaqueta con PyInstaller en modo carpeta (`--onedir`) y compila
+`installer/GBP.iss` con la versión de `gbp/__init__.py`. **Lo que se entrega es
+el `GBP-Setup-*.exe`.** Para sacar una versión nueva, sube `__version__` y vuelve
+a correr el script.
+
+El asistente se ve completo: bienvenida, condiciones de uso que hay que aceptar
+(`installer/licencia.txt`), elección de carpeta, acceso directo opcional en el
+escritorio y confirmación. La instalación es por usuario, en
+`%LOCALAPPDATA%\Programs\Ikalon\GBP` por defecto, y no pide administrador.
+
+Decisiones del instalador que conviene no deshacer:
+
+- **Carpeta y no un solo archivo.** El `--onefile` se descomprimía entero a
+  `%TEMP%` en cada arranque y daba más falsos positivos en los antivirus.
+- **El `AppId` del `.iss` no se cambia nunca.** Es lo que hace que una versión
+  nueva se instale encima de la anterior. `[InstallDelete]` borra `_internal`
+  antes de copiar, para no arrastrar librerías de la versión vieja.
+- **Solo «Abrir con», no programa por defecto.** Los casos son `.gbp.json` y
+  Windows asocia por la última extensión (`.json`). `run.py` recibe la ruta y
+  `MainWindow.open_case_path` la abre.
+- **Desinstalar no toca `%APPDATA%\Ikalon\GBP`**: supuestos, sesión y ajustes
+  sobreviven a actualizar y a desinstalar.
+- **El instalador no está firmado**, así que SmartScreen muestra «Windows protegió
+  su PC» la primera vez (Más información → Ejecutar de todas formas). Para
+  quitarlo hace falta un certificado de firma de código.
 
 `tools/packaging_check.py` es la verificación: se congela aparte como ejecutable
 de consola y comprueba lo que no se ve desde el código fuente — que los recursos

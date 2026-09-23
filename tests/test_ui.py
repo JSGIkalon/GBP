@@ -326,6 +326,17 @@ def test_los_paneles_reflejan_un_caso_cargado(window, tmp_path):
     assert panel.capital_panel.amount.value() == pytest.approx(20_000_000.0)
 
 
+def test_un_caso_se_abre_desde_su_ruta(window, tmp_path):
+    """Es el camino de «Abrir con → GBP»: la ruta llega por la línea de comandos."""
+    path = tmp_path / "desde_windows.gbp.json"
+    save_case(_rich_scenario(), path)
+    window.open_case_path(str(path))
+
+    assert window.scenario.name == "Caso de prueba"
+    assert window.current_path == path
+    assert window.scenario_panel.name_edit.text() == "Caso de prueba"
+
+
 def test_editar_una_estrategia_no_toca_las_demas(window):
     """Los flujos son por estrategia: agregar uno no debe propagarse."""
     from gbp.model.cashflows import FlowKind as Kind

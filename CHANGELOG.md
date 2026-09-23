@@ -416,6 +416,44 @@ Activos propios: la app deja de servir solo para patrimonios en EE.UU.
   camino es dejar elegir un activo de referencia concreto — la regla está
   aislada en `extend_correlations`, así que no obliga a rehacer nada.
 
+## Sesión 16 — 23 sep 2026
+
+GBP deja de ser un .exe portable y pasa a instalarse.
+
+**Hecho**
+
+- **Instalador con Inno Setup 6** (`installer/GBP.iss`). El asistente se ve
+  completo: bienvenida, condiciones de uso que hay que aceptar
+  (`installer/licencia.txt`), elección de carpeta, acceso directo opcional en el
+  escritorio y confirmación. Deja un acceso en el menú Inicio y se desinstala
+  desde Configuración.
+- **La instalación es por usuario** y no pide administrador. Por defecto va a
+  `%LOCALAPPDATA%\Programs\Ikalon\GBP`.
+- **PyInstaller pasa de `--onefile` a `--onedir`.** `tools/build_exe.ps1` arma
+  la carpeta `dist\GBP\` y compila con ella `dist\GBP-Setup-<versión>.exe`
+  (57 MB). La versión sale de `gbp/__init__.py`.
+- **«Abrir con → GBP»** para los casos. `MainWindow.open_case_path` abre un caso
+  desde una ruta y `run.py` le pasa la que llega por la línea de comandos.
+- 184 tests en verde, incluido `test_un_caso_se_abre_desde_su_ruta`.
+
+**Decisiones y hallazgos**
+
+- **Por qué dejar el portable.** El .exe de un solo archivo se descomprimía
+  entero (81 MB) a `%TEMP%` en cada arranque, y es el patrón que más falsos
+  positivos da en los antivirus. Instalada, la app abre en unos 3,5 s con la
+  interfaz ya construida.
+- **No se asocian los `.gbp.json` como programa por defecto.** Windows asocia
+  por la última extensión, que es `.json`: hacerlo sería quedarse con todos los
+  JSON del equipo. GBP solo se registra en «Abrir con». Si se quiere el doble
+  clic, el camino es una extensión propia (`.gbp`).
+- **Desinstalar no borra `%APPDATA%\Ikalon\GBP`.** Los supuestos, la sesión y
+  los ajustes son del usuario, no del programa.
+- El `AppId` del `.iss` no se debe cambiar nunca: es lo que hace que una versión
+  nueva se instale encima de la anterior y no al lado.
+- Verificado de punta a punta: instalación silenciosa, arranque abriendo un caso
+  por argumento, desinstalación que borra archivos, accesos y registro, y
+  conservación de `%APPDATA%`.
+
 ## Sesión 15 — 22 sep 2026
 
 La tabla de asignación baja del anexo al cuerpo, debajo de su gráfica.

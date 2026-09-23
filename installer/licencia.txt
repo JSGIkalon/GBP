@@ -1,0 +1,31 @@
+﻿GBP - PROYECCIÓN PATRIMONIAL
+Condiciones de uso
+
+GBP es una herramienta interna de Ikalon Investments. Al instalarla, usted
+acepta lo siguiente:
+
+1. Uso interno. La herramienta es para uso exclusivo de colaboradores de
+   Ikalon. No se debe copiar, redistribuir ni entregar a terceros.
+
+2. Naturaleza de los resultados. Las proyecciones se obtienen por simulación
+   Monte Carlo a partir de supuestos de mercado de largo plazo. Son
+   estimaciones probabilísticas, no garantizan resultados futuros y no
+   constituyen por sí solas una recomendación de inversión.
+
+3. Supuestos de mercado. Los supuestos de retorno, volatilidad y correlación
+   provienen de fuentes de terceros (Long-Term Capital Market Assumptions de
+   J.P. Morgan) y de los activos propios que declare cada analista. Quien
+   declare un activo propio es responsable de sus supuestos.
+
+4. Revisión antes de entregar. Todo informe generado con GBP debe ser revisado
+   por el responsable del caso antes de compartirse con un cliente.
+
+5. Información de clientes. Los casos guardados pueden contener información
+   confidencial de clientes. Guárdelos solo en ubicaciones autorizadas por
+   Ikalon.
+
+6. Sin garantía. La herramienta se entrega tal cual, sin garantías de ningún
+   tipo sobre su exactitud o disponibilidad.
+
+Los supuestos, ajustes y la sesión se guardan en %APPDATA%\Ikalon\GBP y se
+conservan al actualizar o desinstalar la aplicación.

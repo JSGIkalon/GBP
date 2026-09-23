@@ -398,6 +398,10 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Abrir caso", "", FILE_FILTER)
         if not path:
             return
+        self.open_case_path(path)
+
+    def open_case_path(self, path: str | Path):
+        """Abre un caso desde una ruta: el menú, o Windows con «Abrir con → GBP»."""
         try:
             payload = read_case(path)
             scenario = from_dict(payload)
