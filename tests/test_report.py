@@ -263,11 +263,10 @@ def test_con_muchas_estrategias_el_anexo_gasta_una_hoja_cada_una(
 def test_el_anexo_de_flujos_trae_la_serie_ano_por_ano(corrida):
     """La unica forma de comprobar que un flujo indexado crece como se esperaba."""
     escenario, result, settings = corrida
-    tabla = _flows_table(result, 3)
+    tabla = _flows_table(result)
 
     assert tabla is not None
     assert tabla.kind == FLOWS
-    assert tabla.number == 3
     # Solo la estrategia con flujos: la otra no tiene serie que mostrar.
     assert tabla.strategies == ["Sin deuda"]
     filas = tabla.per_strategy[0][1]

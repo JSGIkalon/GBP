@@ -1160,9 +1160,12 @@ def _summary_table(options: ReportOptions, result: SimulationResult,
     )
 
 
-FLOWS = "Ingresos y retiros por año"
+FLOWS = "Flujos y valor de portafolio por año"
 
-FLOW_COLUMNS = ["Año", "Aportes", "Retiros", "Neto"]
+FLOW_COLUMNS = [
+    "Año", "Flujos netos", "Flujos netos acumulados",
+    "Valor portafolio", "Valor portafolio (moneda de hoy)",
+]
 
 
 @dataclass
@@ -1255,28 +1258,32 @@ def _build_annex(
     return anexos
 
 
-def _flows_table(result: SimulationResult, number: int) -> _AnnexTable | None:
-    """La serie de aportes y retiros año por año, una tabla por estrategia.
+def _flows_table(result: SimulationResult) -> _AnnexTable | None:
+    """Flujos netos y valor de portafolio año por año, una tabla por estrategia.
 
-    Va aparte de la hoja de cada estrategia porque tiene una fila por año del
-    horizonte —treinta, no cuatro— y no cabe en un cuarto de página. Y hace
-    falta: es la única forma de comprobar que un flujo indexado crece como se
-    esperaba, que un porcentual se recalcula sobre el patrimonio vigente, y que
-    ninguno de los dos se sale del rango de años que se le configuró.
+    Va en el cuerpo, junto a las demás tablas de la estrategia, y no en el
+    anexo: tiene una fila por año del horizonte —treinta, no cuatro— pero es
+    la que responde la pregunta que sigue a la de asignación y proyección, que
+    es cuánto queda cada año y de dónde sale ese cambio.
     """
     bloques: list[tuple[str, list[list[str]]]] = []
     for strategy in result.strategies:
         serie = strategy.flow_history()
         if not (serie["aportes"].any() or serie["retiros"].any()):
             continue
+        neto = serie["neto"]
+        acumulado = np.cumsum(neto)
+        valor_nominal = np.median(strategy.values(False), axis=0)
+        valor_real = np.median(strategy.values(True), axis=0)
         bloques.append((
             strategy.name,
             [
                 [
                     str(year),
-                    format_money(float(serie["aportes"][year - 1])),
-                    format_money(float(serie["retiros"][year - 1])),
-                    format_money(float(serie["neto"][year - 1])),
+                    format_money(float(neto[year - 1])),
+                    format_money(float(acumulado[year - 1])),
+                    format_money(float(valor_nominal[year - 1])),
+                    format_money(float(valor_real[year - 1])),
                 ]
                 for year in range(1, strategy.horizon + 1)
             ],
@@ -1285,12 +1292,12 @@ def _flows_table(result: SimulationResult, number: int) -> _AnnexTable | None:
     if not bloques:
         return None
     return _AnnexTable(
-        number=number, kind=FLOWS, columns=FLOW_COLUMNS, per_strategy=bloques,
+        number=0, kind=FLOWS, columns=FLOW_COLUMNS, per_strategy=bloques,
         footnote=(
-            "Valores nominales y medianos sobre los caminos simulados. Un flujo de "
-            "monto fijo es igual en todos los caminos; uno expresado como porcentaje "
-            "del patrimonio no, porque se recalcula cada año sobre el patrimonio "
-            "vigente de cada camino."
+            "Flujos netos: aportes menos retiros, medianos sobre los caminos "
+            "simulados. Valor portafolio: patrimonio neto mediano al cierre de cada "
+            "año, en valores nominales y en moneda de hoy descontada a la inflación "
+            "del escenario."
         ),
     )
 
@@ -1342,7 +1349,7 @@ def build_report(
     con_deuda = options.include_debt and any(s.debt.max() > 0 for s in result.strategies)
 
     annex = _build_annex(options, scenario, result, years, con_deuda)
-    flows = _flows_table(result, len(annex) + 1) if options.include_flows else None
+    flows = _flows_table(result) if options.include_flows else None
 
     with PdfPages(path) as pdf:
         _cover(pdf, options, scenario, result, settings)
@@ -1399,6 +1406,13 @@ def build_report(
                 ),
             )
 
+        if flows is not None:
+            page = _topic_page(
+                pdf, options, page, flows,
+                eyebrow="Flujos y valor de portafolio",
+                lede="Flujos netos y patrimonio mediano, año por año",
+            )
+
         for anexo in annex:
             page = _strategy_annex_page(
                 pdf, options, page, anexo,
@@ -1407,12 +1421,6 @@ def build_report(
                     "forma de distribución. La asignación de esta estrategia va con "
                     "su gráfica, en el cuerpo del informe."
                 ),
-            )
-
-        if flows is not None:
-            page = _topic_page(
-                pdf, options, page, flows,
-                lede=f"Anexo · Hoja {flows.number} · {FLOWS}",
             )
 
         info = pdf.infodict()
