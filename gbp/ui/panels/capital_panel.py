@@ -41,7 +41,7 @@ class CapitalPanel(QWidget):
             "comparación mide la estrategia y no el punto de partida."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #1F2A30;")
+        intro.setStyleSheet("color: #3D5560;")
         layout.addWidget(intro)
 
         self.inherited = QLabel("")

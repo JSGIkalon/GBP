@@ -1,4 +1,4 @@
-﻿"""Panel de configuración general de la app (no del caso)."""
+"""Panel de configuración general de la app (no del caso)."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ class SettingsPanel(QWidget):
             "a todos los análisis."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #1F2A30;")
+        intro.setStyleSheet("color: #3D5560;")
         layout.addWidget(intro)
 
         form = QFormLayout()
@@ -88,12 +88,12 @@ class SettingsPanel(QWidget):
             "útil justamente para ver cuánto de un resultado es ruido del muestreo."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color: #5C6770;")
+        note.setStyleSheet("color: #5B7280;")
         layout.addWidget(note)
 
         self.path_label = QLabel("")
         self.path_label.setWordWrap(True)
-        self.path_label.setStyleSheet("color: #5C6770;")
+        self.path_label.setStyleSheet("color: #5B7280;")
         layout.addWidget(self.path_label)
 
         reset = QPushButton("Restaurar valores por defecto")

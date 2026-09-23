@@ -72,7 +72,7 @@ class StrategiesPanel(QWidget):
             "vienen de la estrategia y no del azar."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #1F2A30;")
+        intro.setStyleSheet("color: #3D5560;")
         layout.addWidget(intro)
 
         layout.addLayout(self._build_selector())
@@ -92,7 +92,7 @@ class StrategiesPanel(QWidget):
 
         row = QHBoxLayout()
         label = QLabel("ESTRATEGIA")
-        label.setStyleSheet("color: #194868; font-weight: 600; letter-spacing: 2px;")
+        label.setStyleSheet("color: #4D849E; font-weight: 600; letter-spacing: 2px;")
         row.addWidget(label)
         self.selector = QComboBox()
         self.selector.currentIndexChanged.connect(self._on_select)

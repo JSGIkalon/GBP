@@ -147,13 +147,6 @@ def _draw_classes(ax, strategies, grouped, classes, title_x: float = 0.0) -> lis
         columnspacing=1.6,
         handlelength=1.2,
     )
-    ax.set_title(
-        "Cada estrategia reparte el patrimonio entre las cuatro clases de activo",
-        loc="left",
-        color=INK,
-        pad=26,
-        x=title_x,
-    )
     return marks
 
 
@@ -219,8 +212,6 @@ def _draw_subclasses(ax, strategies, rows, title_x: float = 0.0) -> list[tuple]:
     ax.set_axisbelow(True)
     if n >= 2:
         ax.legend(loc="lower right", frameon=False, fontsize=8.5)
-    ax.set_title("Detalle por sub-clase", loc="left", color=INK, fontsize=10, pad=8,
-                 x=title_x)
     return marks
 
 

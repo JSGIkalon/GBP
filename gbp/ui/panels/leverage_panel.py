@@ -135,7 +135,7 @@ class LeveragePanel(QWidget):
             "intereses se capitalizan, el saldo remanente se cancela íntegro al vencimiento."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color: #5C6770;")
+        note.setStyleSheet("color: #5B7280;")
         layout.addWidget(note)
         layout.addStretch(1)
 

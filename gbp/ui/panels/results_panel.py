@@ -107,7 +107,7 @@ class ResultsPanel(QTabWidget):
             "crece o ya se está consumiendo. Las cifras en dinero son nominales."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color: #5C6770;")
+        note.setStyleSheet("color: #5B7280;")
         s_layout.addWidget(note)
         self.addTab(summary, "Supuestos")
 
@@ -127,7 +127,7 @@ class ResultsPanel(QTabWidget):
             "cargan siempre por sub-clase."
         )
         allocation_note.setWordWrap(True)
-        allocation_note.setStyleSheet("color: #5C6770;")
+        allocation_note.setStyleSheet("color: #5B7280;")
         a_layout.addWidget(allocation_note)
         self.addTab(allocation, "Asignación")
 
@@ -156,7 +156,7 @@ class ResultsPanel(QTabWidget):
         layout.addWidget(table, 2)
         label = QLabel(note)
         label.setWordWrap(True)
-        label.setStyleSheet("color: #5C6770;")
+        label.setStyleSheet("color: #5B7280;")
         layout.addWidget(label)
         self.addTab(page, title)
         return canvas, table

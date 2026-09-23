@@ -70,7 +70,7 @@ class CashflowPanel(QWidget):
             "vigente: el retiro sube y baja con el mercado y el portafolio no se agota."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #1F2A30;")
+        intro.setStyleSheet("color: #3D5560;")
         layout.addWidget(intro)
 
         # Los botones van **encima** de la tabla, igual que en Pesos. Debajo
@@ -112,7 +112,7 @@ class CashflowPanel(QWidget):
         layout.addWidget(self.table, 1)
 
         self.summary = QLabel("")
-        self.summary.setStyleSheet("color: #5C6770;")
+        self.summary.setStyleSheet("color: #5B7280;")
         layout.addWidget(self.summary)
 
         self.reload(scenario, strategy)

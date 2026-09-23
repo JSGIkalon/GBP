@@ -20,26 +20,29 @@ tonos: la interfaz impide agregar más estrategias.
 
 from __future__ import annotations
 
-# --- Gama del manual de marca ---------------------------------------------
-NAVY = "#002e45"          # Fondos institucionales, texto display, estructura
+# --- Gama del handoff de diseño 2026 ---------------------------------------
+NAVY = "#0B2A36"          # Fondos institucionales, texto display, estructura
 EMPHASIS = "#007ABA"      # ÚNICO texto de énfasis sobre blanco. Nunca como relleno.
-BLUE_MID = "#194868"      # Estructura y etiquetas secundarias. No es énfasis.
-CYAN = "#27b4ff"          # Rellenos y acento sobre navy. Nunca texto sobre blanco.
-BLUE_LIGHT = "#76d4f3"    # Jerarquía de relleno terciario
-NEUTRAL = "#E3E8EC"       # Segmentos neutros y filas de tabla de bajo contraste
-LEADER = "#CDD2D5"        # Líder-lines únicamente
-INK = "#1F2A30"           # Texto cuerpo
-INK_SOFT = "#5C6770"      # Captions, etiquetas, fuente al pie
+BLUE_MID = "#4D849E"      # "Teal": estructura y etiquetas secundarias. No es énfasis.
+TEAL_DARK = "#0B617D"     # Condiciones/anotaciones sobre tramos con relleno
+CYAN = "#1BA9E6"          # Rellenos y acento sobre navy. Nunca texto sobre blanco.
+BLUE_LIGHT = "#8ED3F0"    # Jerarquía de relleno terciario
+NEUTRAL = "#E1E6EA"       # "Hairline": segmentos neutros y filas de tabla de bajo contraste
+LEADER = "#9BB9CC"        # "Teal soft": líder-lines únicamente
+FILL_SOFT = "#C8DAE3"     # "Teal pale": rellenos suaves bajo líneas (p.ej. deuda)
+PANEL = "#F7F9FA"         # Fondo de panel lateral
+INK = "#3D5560"           # Texto cuerpo
+INK_SOFT = "#5B7280"      # "Muted": captions, etiquetas, fuente al pie
 WHITE = "#FFFFFF"
+SERIES_FOURTH = "#2E5F7A"  # cuarto paso de la serie, distinto del teal de estructura
 
 # --- Series de datos -------------------------------------------------------
 # El orden de los pasos NO es el de la rampa: está elegido para que las primeras
 # series sean las más separadas entre sí, porque casi todos los casos comparan
 # dos o tres estrategias. Navy (muy oscuro), cyan (brillante) y azul claro
-# (pálido) se distinguen sin esfuerzo; el azul medio queda de cuarto porque es
-# el que más se confunde con el navy. Probado mirando el gráfico: con el orden
-# de la rampa, la primera y la tercera serie eran casi el mismo color.
-SERIES = [NAVY, CYAN, BLUE_LIGHT, BLUE_MID]
+# (pálido) se distinguen sin esfuerzo; el cuarto paso queda al final porque es
+# el que más se confunde con el navy. Orden fijo del handoff de diseño 2026.
+SERIES = [NAVY, CYAN, BLUE_LIGHT, SERIES_FOURTH]
 # Texto legible encima de cada relleno.
 SERIES_TEXT = [WHITE, INK, INK, WHITE]
 
@@ -212,7 +215,7 @@ QGroupBox::title {{
 
 QTableWidget {{
     background-color: {WHITE};
-    alternate-background-color: #F7F9FA;
+    alternate-background-color: {PANEL};
     gridline-color: transparent;
     border: none;
     selection-background-color: {NEUTRAL};
@@ -248,6 +251,7 @@ QListWidget::item:selected {{
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     background-color: {WHITE};
     border: none;
+    border-radius: 0px;
     border-bottom: 1px solid {LEADER};
     padding: 6px 4px;
     color: {INK};
@@ -266,6 +270,7 @@ QPushButton {{
     border-bottom: 2px solid {NEUTRAL};
     padding: 7px 14px;
     font-weight: 600;
+    border-radius: 0px;
 }}
 QPushButton:hover {{
     border-bottom: 2px solid {EMPHASIS};
@@ -279,16 +284,34 @@ QPushButton#runButton {{
     background-color: {NAVY};
     color: {WHITE};
     border: none;
-    padding: 10px 22px;
+    border-radius: 3px;
+    padding: 11px 22px;
     font-size: 14px;
     font-weight: 600;
 }}
 QPushButton#runButton:hover {{
-    background-color: {BLUE_MID};
+    background-color: #061A22;
 }}
 QPushButton#runButton:disabled {{
     background-color: {LEADER};
     color: {WHITE};
+}}
+
+QPushButton#secondaryButton {{
+    background-color: {WHITE};
+    color: {NAVY};
+    border: 1px solid {NAVY};
+    border-radius: 3px;
+    padding: 11px 22px;
+    font-size: 14px;
+    font-weight: 600;
+}}
+QPushButton#secondaryButton:hover {{
+    background-color: {PANEL};
+}}
+QPushButton#secondaryButton:disabled {{
+    border: 1px solid {LEADER};
+    color: {LEADER};
 }}
 
 QProgressBar {{

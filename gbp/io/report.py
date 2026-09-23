@@ -66,6 +66,7 @@ from ..ui.charts.allocation_chart import allocation_table_rows, draw_allocation_
 from ..ui.charts.box_chart import distribution_table_rows, draw_box_chart
 from ..ui.charts.debt_chart import draw_debt_chart
 from ..ui.theme import (
+    BLUE_MID,
     INK,
     INK_SOFT,
     LEADER,
@@ -218,31 +219,59 @@ def _wrap(text: str, width: int) -> list[str]:
 
 
 # ----------------------------------------------------------------------
+# Las cuatro cifras de cabecera de la portada: lo que define la corrida antes
+# de mirar un solo resultado. El mismo patrón "número grande / eyebrow debajo"
+# que usan las tarjetas KPI del cuerpo, para que la portada anticipe el
+# lenguaje visual del resto del informe en vez de abrir con un párrafo.
+def _cover_kpis(scenario: Scenario, result: SimulationResult,
+                settings: SimulationSettings) -> list[tuple[str, str]]:
+    return [
+        (format_money(scenario.initial_value), "Capital inicial"),
+        (f"{scenario.horizon} años", "Horizonte"),
+        (f"{scenario.inflation:.2%}", "Inflación anual"),
+        (f"{result.n_paths:,}", "Simulaciones · Semilla "
+         f"{result.seed if result.seed is not None else 'aleatoria'}"),
+    ]
+
+
 def _cover(pdf: PdfPages, options: ReportOptions, scenario: Scenario,
            result: SimulationResult, settings: SimulationSettings):
     figure = Figure(figsize=PAGE_SIZE, dpi=150)
     figure.patch.set_facecolor("white")
 
-    figure.text(MARGIN, 0.88, "IKALON INVESTMENTS", color=NAVY, fontsize=10,
-                fontweight="semibold")
-    figure.text(MARGIN, 0.80, options.title, color=NAVY, fontsize=30,
+    figure.text(
+        MARGIN, 0.93, "PROYECCIÓN PATRIMONIAL · CONFIDENCIAL",
+        color=BLUE_MID, fontsize=9, fontweight="semibold",
+    )
+    figure.text(MARGIN, 0.86, options.title, color=NAVY, fontsize=28,
                 fontweight="semibold", va="top")
 
-    y = 0.66
-    for label, value in (
-        ("Cliente", options.client),
-        ("Caso", scenario.name),
-        ("Fecha", options.date_text),
-        ("Preparado por", options.author),
-    ):
-        if not value:
-            continue
-        figure.text(MARGIN, y, label, color=INK_SOFT, fontsize=9)
-        figure.text(MARGIN + 0.14, y, value, color=INK, fontsize=12)
-        y -= 0.05
+    y = 0.74
+    ficha = " · ".join(
+        value for value in (
+            f"Caso {scenario.name}" if scenario.name else "",
+            options.client, options.date_text,
+            f"Preparado por {options.author}" if options.author else "",
+        ) if value
+    )
+    if ficha:
+        figure.text(MARGIN, y, ficha, color=INK_SOFT, fontsize=10)
+        y -= 0.045
 
-    _add_rule(figure, y - 0.02)
-    y -= 0.08
+    # Las cuatro tarjetas de cabecera, repartidas a ancho igual sobre el
+    # margen de la página.
+    _add_rule(figure, y)
+    y -= 0.05
+    kpis = _cover_kpis(scenario, result, settings)
+    ancho = (1 - 2 * MARGIN) / len(kpis)
+    for i, (value, label) in enumerate(kpis):
+        x = MARGIN + i * ancho
+        figure.text(x, y, value, color=NAVY, fontsize=26, fontweight="semibold", va="top")
+        figure.text(x, y - 0.075, label.upper(), color=INK_SOFT, fontsize=8.5,
+                    fontweight="semibold")
+    y -= 0.12
+    _add_rule(figure, y)
+    y -= 0.07
 
     best = max(result.strategies, key=lambda s: s.success_probability)
     figure.text(
@@ -255,17 +284,7 @@ def _cover(pdf: PdfPages, options: ReportOptions, scenario: Scenario,
         f"{s.name}: {s.success_probability:.1%}" for s in result.strategies
     )
     figure.text(MARGIN, y, detalle, color=INK_SOFT, fontsize=9.5)
-
-    y -= 0.06
-    ficha = (
-        f"Capital inicial {format_money(scenario.initial_value)} · "
-        f"horizonte {scenario.horizon} años · inflación {scenario.inflation:.2%} · "
-        f"{result.n_paths:,} simulaciones · "
-        f"semilla {result.seed if result.seed is not None else 'aleatoria'}"
-    )
-    for line in _wrap(ficha, 110):
-        figure.text(MARGIN, y, line, color=INK_SOFT, fontsize=9)
-        y -= 0.028
+    y -= 0.05
 
     if options.notes.strip():
         y -= 0.02

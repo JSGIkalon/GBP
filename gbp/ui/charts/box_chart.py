@@ -4,8 +4,8 @@ Forma: box plot agrupado. El dato es la **dispersión** de una distribución en
 unos pocos cortes de tiempo, y la caja la muestra sin fingir que hay una serie
 continua entre año y año.
 
-Percentiles: caja p25–p75, bigotes p10–p90, mediana marcada. Se usan percentiles
-y no una desviación estándar aritmética porque el patrimonio simulado es
+Percentiles: caja p25–p75, línea vertical p10–p90, mediana marcada. Se usan
+percentiles y no una desviación estándar aritmética porque el patrimonio simulado es
 lognormal y asimétrico a la derecha: una banda simétrica alrededor de la media
 se va demasiado abajo (llega a dar negativa cuando casi ningún camino lo es) y
 se queda corta en la cola alta. Los percentiles salen directo de los caminos
@@ -19,7 +19,6 @@ import numpy as np
 from ...model.results import SimulationResult
 from ..theme import (
     BASELINE,
-    INK,
     INK_SOFT,
     clean_axes,
     format_money,
@@ -126,18 +125,16 @@ def draw_box_chart(canvas, result: SimulationResult, years: list[int], real: boo
             columnspacing=1.6,
             handlelength=1.4,
         )
-    ax.set_title(
-        "La mitad central de los resultados cae dentro de la caja",
-        loc="left",
-        color=INK,
-        pad=28 if n_strategies >= 2 else 10,
-    )
+    if n_strategies >= 2:
+        # Sin título, la leyenda necesita algo de aire encima del eje para no
+        # quedar pegada al borde superior de la página.
+        ax.margins(y=0.12)
 
     # La nota va **dentro del eje**, no colgando por debajo en coordenadas de
     # eje: con `xy=(0, -0.16)` caía fuera del área de trazado y, en la geometría
     # de página del PDF, aterrizaba justo encima del pie de página —el título y
     # la fecha impresos por `_new_page`— y los dos textos se superponían.
-    footnote = "Caja: percentil 25 al 75 · Bigotes: percentil 10 al 90 · Línea: mediana"
+    footnote = "Caja: percentil 25 a 75 · Línea vertical: percentil 10 a 90 · Etiqueta: mediana"
     if not label_all:
         footnote += " — solo se etiqueta la mediana; el resto está en la tabla"
     ax.set_xlabel(footnote, fontsize=8, color=INK_SOFT, loc="left", labelpad=10)
@@ -172,7 +169,7 @@ def _label_box(
 ):
     """Etiquetas numéricas, redondeadas y sin decimales.
 
-    La mediana y los extremos de los bigotes van siempre. Los cuartiles se
+    La mediana y los extremos de la línea vertical van siempre. Los cuartiles se
     omiten cuando la caja es tan baja que su etiqueta chocaría con la de la
     mediana: el valor sigue estando en la tabla y al pasar el mouse.
     """

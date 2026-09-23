@@ -6,7 +6,7 @@ import numpy as np
 from matplotlib.ticker import MaxNLocator
 
 from ...model.results import SimulationResult
-from ..theme import INK, clean_axes, series_color
+from ..theme import clean_axes, series_color
 
 
 def draw_debt_chart(canvas, result: SimulationResult):
@@ -56,12 +56,7 @@ def draw_debt_chart(canvas, result: SimulationResult):
             columnspacing=1.6,
             handlelength=1.4,
         )
-    ax.set_title(
-        "El saldo de la deuda evoluciona según la amortización y las llamadas a margen",
-        loc="left",
-        color=INK,
-        pad=28 if n >= 2 else 10,
-    )
+        ax.margins(y=0.12)
 
     def probe(x_data, _y, _ax):
         if x_data is None:

@@ -37,7 +37,7 @@ class ScenarioPanel(QWidget):
             "de supuestos."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #1F2A30;")
+        intro.setStyleSheet("color: #3D5560;")
         layout.addWidget(intro)
 
         form = QFormLayout()
@@ -84,7 +84,7 @@ class ScenarioPanel(QWidget):
             "resultados en poder adquisitivo de hoy."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color: #5C6770;")
+        note.setStyleSheet("color: #5B7280;")
         layout.addWidget(note)
         layout.addStretch(1)
 

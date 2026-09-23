@@ -43,10 +43,10 @@ def _cell_color(value: float) -> QColor:
     negativa— con el gris neutro en el medio. El signo siempre está escrito en
     la celda, así que la lectura no depende del color.
     """
-    neutral = QColor("#E3E8EC")
+    neutral = QColor("#E1E6EA")
     if value >= 0:
-        return _mix(neutral, QColor("#002e45"), value)
-    return _mix(neutral, QColor("#27b4ff"), -value)
+        return _mix(neutral, QColor("#0B2A36"), value)
+    return _mix(neutral, QColor("#1BA9E6"), -value)
 
 
 class HeatmapDelegate(QStyledItemDelegate):
@@ -90,7 +90,7 @@ class CorrelationPanel(QWidget):
             "LTCMA con tools/import_ltcma.py."
         )
         source.setWordWrap(True)
-        source.setStyleSheet("color: #1F2A30;")
+        source.setStyleSheet("color: #3D5560;")
         layout.addWidget(source)
 
         if correlations.psd_adjustment > 0:
@@ -100,7 +100,7 @@ class CorrelationPanel(QWidget):
                 f"lo es; el ajuste máximo aplicado es de {correlations.psd_adjustment:.4f}."
             )
             note.setWordWrap(True)
-            note.setStyleSheet("color: #5C6770;")
+            note.setStyleSheet("color: #5B7280;")
             layout.addWidget(note)
 
         controls = QHBoxLayout()
@@ -124,7 +124,7 @@ class CorrelationPanel(QWidget):
 
         self.derived_note = QLabel("")
         self.derived_note.setWordWrap(True)
-        self.derived_note.setStyleSheet("color: #5C6770;")
+        self.derived_note.setStyleSheet("color: #5B7280;")
         self.derived_note.setVisible(False)
         layout.addWidget(self.derived_note)
 
@@ -176,7 +176,7 @@ class CorrelationPanel(QWidget):
                 if value > 0.6:
                     item.setForeground(QBrush(QColor("#FFFFFF")))
                 else:
-                    item.setForeground(QBrush(QColor("#1F2A30")))
+                    item.setForeground(QBrush(QColor("#3D5560")))
                 propio = self.resolver is not None and (
                     self.resolver.is_custom(names[i])
                     or self.resolver.is_custom(names[j])

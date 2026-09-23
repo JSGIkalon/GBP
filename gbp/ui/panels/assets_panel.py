@@ -66,7 +66,7 @@ class AssetsPanel(QWidget):
             "dos personas con el mismo caso obtienen la misma proyección."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #1F2A30;")
+        intro.setStyleSheet("color: #3D5560;")
         layout.addWidget(intro)
 
         propios = QLabel(
@@ -76,12 +76,12 @@ class AssetsPanel(QWidget):
             "otro computador."
         )
         propios.setWordWrap(True)
-        propios.setStyleSheet("color: #1F2A30;")
+        propios.setStyleSheet("color: #3D5560;")
         layout.addWidget(propios)
 
         source = QLabel(self._source_note())
         source.setWordWrap(True)
-        source.setStyleSheet("color: #5C6770;")
+        source.setStyleSheet("color: #5B7280;")
         layout.addWidget(source)
 
         filtros = QHBoxLayout()
@@ -124,7 +124,7 @@ class AssetsPanel(QWidget):
         layout.addLayout(botones)
 
         self.status = QLabel("")
-        self.status.setStyleSheet("color: #5C6770;")
+        self.status.setStyleSheet("color: #5B7280;")
         layout.addWidget(self.status)
 
         self.reload(cmas)
