@@ -254,8 +254,7 @@ class ResultsPanel(QTabWidget):
         self.headline.setText(
             f"<div style='font-size:15px;'>{lede}</div>"
             f"<div style='color:{BLUE_MID}; margin-top:4px;'>{detail}</div>"
-            f"<div style='color:{INK_SOFT}; font-size:12px;'>{result.n_paths:,} simulaciones · "
-            f"semilla {result.seed if result.seed is not None else 'aleatoria'}</div>"
+            f"<div style='color:{INK_SOFT}; font-size:12px;'>{result.n_paths:,} simulaciones</div>"
         )
 
     def _show_debt(self, result: SimulationResult):

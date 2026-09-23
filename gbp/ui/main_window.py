@@ -511,7 +511,7 @@ class MainWindow(QMainWindow):
                 self,
                 "Nada que exportar",
                 "Corre la simulación antes de exportar: el informe documenta una "
-                "corrida concreta, con su semilla y su número de caminos.",
+                "corrida concreta, con su número de caminos.",
             )
             return
 

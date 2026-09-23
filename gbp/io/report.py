@@ -13,8 +13,9 @@ razones, y las dos pesan:
 El precio es que las tablas se dibujan como tablas de matplotlib y hay que
 paginarlas a mano. Está resuelto en `_table_pages`.
 
-El informe es un registro: cada página lleva la fecha, la semilla y el número de
-caminos, que es lo que permite reproducir la corrida exacta más adelante.
+El informe es un registro: cada página lleva la fecha y el número de caminos.
+La semilla del sorteo es fija en el motor y no se expone en la interfaz ni en
+el documento —no es un parámetro que el analista deba conocer ni decidir.
 
 Estructura
 ----------
@@ -229,8 +230,7 @@ def _cover_kpis(scenario: Scenario, result: SimulationResult,
         (format_money(scenario.initial_value), "Capital inicial"),
         (f"{scenario.horizon} años", "Horizonte"),
         (f"{scenario.inflation:.2%}", "Inflación anual"),
-        (f"{result.n_paths:,}", "Simulaciones · Semilla "
-         f"{result.seed if result.seed is not None else 'aleatoria'}"),
+        (f"{result.n_paths:,}", "Simulaciones"),
     ]
 
 

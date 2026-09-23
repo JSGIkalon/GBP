@@ -194,7 +194,12 @@ def settings_path() -> Path:
 
 
 def load_settings() -> SimulationSettings:
-    """Configuración general de la app (número de simulaciones, semilla, vista)."""
+    """Configuración general de la app (número de simulaciones, vista).
+
+    La semilla **no** se lee del archivo: queda fija en el valor por defecto
+    de `SimulationSettings`, aunque una versión anterior de la app hubiera
+    guardado una distinta. No es configurable ni se expone en ninguna parte.
+    """
     path = settings_path()
     if not path.exists():
         return SimulationSettings()
@@ -207,7 +212,7 @@ def load_settings() -> SimulationSettings:
 
         return SimulationSettings(
             n_paths=int(payload.get("n_paths", defaults.n_paths)),
-            seed=payload.get("seed", defaults.seed),
+            seed=defaults.seed,
             milestone_years=milestones,
         )
     except (TypeError, ValueError):

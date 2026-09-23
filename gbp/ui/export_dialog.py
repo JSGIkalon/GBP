@@ -46,7 +46,7 @@ class ExportDialog(QDialog):
         layout = QVBoxLayout(self)
 
         intro = QLabel(
-            "El PDF deja el registro de esta corrida —fecha, semilla y número de "
+            "El PDF deja el registro de esta corrida —fecha y número de "
             "caminos— y es lo que se entrega al cliente."
         )
         intro.setWordWrap(True)
