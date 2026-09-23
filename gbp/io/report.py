@@ -18,18 +18,19 @@ caminos, que es lo que permite reproducir la corrida exacta más adelante.
 
 Estructura
 ----------
-Portada · supuestos del caso · asignación · **supuestos resumen** · proyección ·
-deuda · **anexo**.
+Portada · supuestos del caso · **asignación (con su tabla debajo)** ·
+**supuestos resumen** · proyección · deuda · **anexo**.
 
-**La única tabla del cuerpo son los supuestos resumen**, y va justo antes de las
-láminas de proyección: dice con qué retorno, volatilidad y Sharpe se generó la
-nube de trayectorias que viene a continuación, así que es lo que hay que tener en
-la cabeza al mirarla. En el anexo obligaba a irse al final del documento para
-entender la gráfica que se tenía delante.
+**En el cuerpo va la tabla de la gráfica que explica, debajo de ella**: los
+supuestos resumen antes de la proyección —dicen con qué retorno, volatilidad y
+Sharpe se generó la nube de trayectorias que viene a continuación— y la
+asignación de activos bajo su propia lámina, que es el detalle exacto de las
+barras que se tienen delante. En el anexo obligaban a irse al final del documento
+para leer la cifra de lo que se estaba mirando.
 
 El resto de las tablas sí viven en el anexo, y ahí **cada estrategia ocupa una
-hoja**: su asignación, su proyección en las dos unidades y su deuda, repartidas
-en una retícula de dos columnas. La ficha completa de una estrategia es una sola
+hoja**: su proyección en las dos unidades y su deuda, repartidas en una retícula
+de dos columnas. La ficha completa de una estrategia es una sola
 página que se puede arrancar y entregar; por tema, había que recorrer el anexo
 entero para armarla.
 
@@ -310,26 +311,25 @@ def _chart_page(pdf: PdfPages, options: ReportOptions, page_no: int, eyebrow: st
     """
     figure = _new_page(pdf, options, eyebrow, page_no)
     draw(_FigureCanvas(figure, rect=rect))
-    if footnote:
-        # Por **debajo** de la nota que el propio gráfico escribe bajo su eje
-        # —el box plot explica ahí sus percentiles—, no encima: a la misma
-        # altura las dos líneas quedaban pegadas y con sangrías distintas.
-        # Se apila de abajo hacia arriba: escrita hacia abajo desde un tope fijo,
-        # una nota de dos líneas se montaba sobre la fecha del pie de página.
-        lines = _wrap(footnote, 150)
-        for i, line in enumerate(reversed(lines)):
-            figure.text(MARGIN, FOOTNOTE_BASE + i * FOOTNOTE_STEP, line,
-                        color=INK_SOFT, fontsize=7.5)
+    # Por **debajo** de la nota que el propio gráfico escribe bajo su eje —el box
+    # plot explica ahí sus percentiles—, no encima: a la misma altura las dos
+    # líneas quedaban pegadas y con sangrías distintas. Se apila de abajo hacia
+    # arriba: escrita hacia abajo desde un tope fijo, una nota de dos líneas se
+    # montaba sobre la fecha del pie de página.
+    _footnote(figure, footnote)
     pdf.savefig(figure)
     return page_no + 1
 
 
 BASE_TABLE_FONTSIZE = 8.0
-# Alto de una fila de tabla en fracción de figura, por punto de cuerpo. Es una
-# constante medida y no una estimación: matplotlib calcula el alto de celda a
-# partir del cuerpo de letra y de la altura de la **figura**, no de la del eje,
-# así que la misma tabla mide lo mismo la pongas en el eje que la pongas.
-# Incluye el 1.55 con que `_draw_table` escala el alto.
+# Alto de una fila de tabla en fracción de figura, por punto de cuerpo. Vale
+# 0.03124 al cuerpo base, que es el alto de fila de siempre.
+#
+# `_draw_table` **lo impone**, no lo hereda. matplotlib fija el alto de celda al
+# crear la tabla, a partir del cuerpo de letra de los rcParams, y `set_fontsize`
+# después solo cambia el texto: una tabla a 5.5 puntos conservaba filas de 8 y
+# se salía por debajo de la hoja aunque la cuenta dijera que cabía. Impuesto
+# aquí, el alto es proporcional al cuerpo y la cuenta es cierta por construcción.
 ROW_HEIGHT_PER_POINT = 0.03124 / 8.0
 # Alto útil de una tabla a página completa, bajo el titular y sobre la nota.
 FULL_TABLE_HEIGHT = 0.72
@@ -349,13 +349,42 @@ ROWS_PER_PAGE = _rows_that_fit(FULL_TABLE_HEIGHT, BASE_TABLE_FONTSIZE)
 # Por debajo de este cuerpo la tabla deja de ser legible impresa, y es preferible
 # gastar una hoja por estrategia antes que apretarlas todas en una ilegible.
 MIN_TABLE_FONTSIZE = 5.5
-# Ancho que necesita una columna de tabla, en pulgadas, al cuerpo base. Medido
-# sobre la columna más ancha que imprime el informe ("Desv. est." con cifras como
-# "111.8MM"), más el aire de la celda. De aquí sale el cuerpo de letra, y con él
-# el punto en que un tema deja de caber en una hoja: tres estrategias entran, y
-# de cuatro en adelante se reparte en una hoja por estrategia.
-COLUMN_INCHES = 0.50
 TABLE_GAP = 0.02
+# Ancho medio de un glifo de Jost en fracción del cuerpo de letra, y aire a cada
+# lado del texto de una celda, en pulgadas. De los dos sale el cuerpo con que una
+# tabla cabe en un ancho dado, y con él el punto en que un tema deja de caber en
+# una hoja y se reparte en una hoja por estrategia.
+CHAR_WIDTH_EM = 0.52
+CELL_PADDING_INCHES = 0.07
+
+
+def _column_weights(columns: list[str], rows: list[list[str]]) -> list[float]:
+    """Cuánto ancho pide cada columna, medido en caracteres de su texto más largo.
+
+    Las columnas de una tabla de matplotlib son todas igual de anchas por
+    defecto, y eso no sirve aquí: "Renta variable" y "Peso" no necesitan lo
+    mismo, así que la columna angosta sobraba de espacio mientras la ancha
+    escupía su texto encima de la vecina.
+    """
+    return [
+        float(max([len(str(c))] + [len(str(row[i])) for row in rows if i < len(row)]))
+        for i, c in enumerate(columns)
+    ]
+
+
+def _fit_fontsize(columns: list[str], rows: list[list[str]], width_inches: float,
+                  ceiling: float = BASE_TABLE_FONTSIZE) -> float:
+    """Cuerpo de letra con que la tabla cabe en ese ancho, sin pasar del techo.
+
+    Puede devolver un valor por debajo de `MIN_TABLE_FONTSIZE`: quien llama
+    decide entonces si aprieta o si reparte la tabla en más hojas. Decidirlo
+    aquí escondería esa elección dentro de un cálculo de tipografía.
+    """
+    caracteres = sum(_column_weights(columns, rows))
+    disponible = width_inches - CELL_PADDING_INCHES * len(columns)
+    if caracteres <= 0 or disponible <= 0:
+        return ceiling
+    return min(ceiling, disponible * 72.0 / (caracteres * CHAR_WIDTH_EM))
 
 
 def _footnote(figure: Figure, text: str):
@@ -376,7 +405,18 @@ def _draw_table(ax, columns: list[str], rows: list[list[str]], fontsize: float):
     table = ax.table(cellText=rows, colLabels=columns, loc="upper center", cellLoc="right")
     table.auto_set_font_size(False)
     table.set_fontsize(fontsize)
-    table.scale(1, 1.55)
+
+    # Cada columna se lleva el ancho que pide su texto más largo, no una parte
+    # igual: así la de sub-clase respira y la de peso no sobra de sitio. Y el
+    # alto de fila se impone en vez de heredarlo, para que sea proporcional al
+    # cuerpo de letra (ver `ROW_HEIGHT_PER_POINT`).
+    pesos = _column_weights(columns, rows)
+    total = sum(pesos) or 1.0
+    alto_fila = fontsize * ROW_HEIGHT_PER_POINT / ax.get_position().height
+    for (_, col), cell in table.get_celld().items():
+        cell.set_width(pesos[col] / total)
+        cell.set_height(alto_fila)
+
     for (row, col), cell in table.get_celld().items():
         cell.visible_edges = "B"
         cell.set_edgecolor(NEUTRAL)
@@ -439,8 +479,10 @@ def _topic_page(pdf: PdfPages, options: ReportOptions, page_no: int,
 
     ancho_util = 1 - 2 * MARGIN
     ancho = (ancho_util - TABLE_GAP * (len(bloques) - 1)) / len(bloques)
-    pulgadas_por_columna = ancho / len(tabla.columns) * PAGE_SIZE[0]
-    fontsize = BASE_TABLE_FONTSIZE * min(1.0, pulgadas_por_columna / COLUMN_INCHES)
+    fontsize = min(
+        _fit_fontsize(tabla.columns, filas, ancho * PAGE_SIZE[0])
+        for _, filas in bloques
+    )
 
     if fontsize < MIN_TABLE_FONTSIZE:
         for nombre, filas in bloques:
@@ -551,14 +593,12 @@ def _strategy_annex_page(pdf: PdfPages, options: ReportOptions, page_no: int,
 
     ancho = (1 - 2 * MARGIN - TABLE_GAP) / 2
 
-    # El cuerpo de letra lo fija la tabla más ancha de la hoja: dos tablas de la
-    # misma hoja con cuerpos distintos se leen como si una fuera menos
+    # El cuerpo de letra lo fija la tabla más exigente de la hoja: dos tablas de
+    # la misma hoja con cuerpos distintos se leen como si una fuera menos
     # importante que la otra, y aquí todas son la misma ficha.
-    max_columnas = max(len(b.columns) for b in bloques)
-    pulgadas = ancho / max_columnas * PAGE_SIZE[0]
     fontsize = max(
         MIN_TABLE_FONTSIZE,
-        BASE_TABLE_FONTSIZE * min(1.0, pulgadas / COLUMN_INCHES),
+        min(_fit_fontsize(b.columns, b.rows, ancho * PAGE_SIZE[0]) for b in bloques),
     )
     row_height = fontsize * ROW_HEIGHT_PER_POINT
 
@@ -582,6 +622,98 @@ def _strategy_annex_page(pdf: PdfPages, options: ReportOptions, page_no: int,
         _footnote(figure, footnote)
         pdf.savefig(figure)
         page_no += 1
+    return page_no
+
+
+# Alto máximo que la tabla de asignación le puede quitar a su gráfica. Más que
+# esto y la gráfica —que es lo que se mira primero— queda de tira.
+ALLOCATION_TABLE_HEIGHT = 0.34
+ALLOCATION_LABEL_DROP = 0.028
+
+
+def _allocation_page(pdf: PdfPages, options: ReportOptions, page_no: int,
+                     scenario: Scenario, footnote: str = "") -> int:
+    """La asignación de activos: la gráfica y, **debajo, su tabla**.
+
+    La tabla no va al anexo. Es el detalle exacto de la gráfica que se tiene
+    delante —qué sub-clase pesa cuánto en cada estrategia—, y mandarla al final
+    del documento obligaba a pasar diez hojas para leer la cifra de la barra que
+    se está mirando.
+
+    La tabla se lleva el alto que pide, hasta un tope; lo que sobre continúa en
+    una hoja aparte, porque la gráfica no puede quedar reducida a una tira.
+    """
+    columnas = ["Clase de activo", "Sub-clase", "Peso"]
+    por_estrategia: dict[str, list[list[str]]] = {}
+    for row in allocation_table_rows(scenario, options.resolver):
+        por_estrategia.setdefault(row["Estrategia"], []).append(
+            [row[c] for c in columnas]
+        )
+    bloques = [
+        (s.name, por_estrategia[s.name])
+        for s in scenario.strategies if por_estrategia.get(s.name)
+    ]
+
+    def dibujar(canvas):
+        draw_allocation_chart(canvas, scenario, options.resolver, ALLOCATION_TITLE_X)
+
+    if not bloques:
+        return _chart_page(pdf, options, page_no, "Asignación de activos",
+                           dibujar, footnote, rect=ALLOCATION_RECT)
+
+    ancho = (1 - 2 * MARGIN - TABLE_GAP * (len(bloques) - 1)) / len(bloques)
+    por_ancho = min(
+        _fit_fontsize(columnas, filas, ancho * PAGE_SIZE[0]) for _, filas in bloques
+    )
+    # El cuerpo también sale del **alto**: si la tabla se pasa por una o dos
+    # filas, encoge un punto y entra entera. Partirla gastaba una hoja de
+    # continuación para una fila suelta, que es peor negocio que medio punto
+    # menos de letra.
+    filas_max = max(len(filas) for _, filas in bloques)
+    por_alto = ALLOCATION_TABLE_HEIGHT / ((filas_max + 1) * ROW_HEIGHT_PER_POINT)
+    fontsize = max(MIN_TABLE_FONTSIZE, min(por_ancho, por_alto))
+    row_height = fontsize * ROW_HEIGHT_PER_POINT
+
+    caben = _rows_that_fit(ALLOCATION_TABLE_HEIGHT, fontsize)
+    visibles = min(max(len(filas) for _, filas in bloques), caben)
+    alto_tabla = (visibles + 1) * row_height
+    tope_tabla = ANNEX_BOTTOM + alto_tabla
+
+    figure = _new_page(pdf, options, "Asignación de activos", page_no)
+    base_grafica = tope_tabla + ALLOCATION_LABEL_DROP + 0.045
+    x, _, ancho_grafica, _ = ALLOCATION_RECT
+    tope_grafica = ALLOCATION_RECT[1] + ALLOCATION_RECT[3]
+    dibujar(_FigureCanvas(
+        figure, rect=(x, base_grafica, ancho_grafica, tope_grafica - base_grafica)
+    ))
+
+    for i, (nombre, filas) in enumerate(bloques):
+        columna_x = MARGIN + i * (ancho + TABLE_GAP)
+        _swatch(figure, columna_x, tope_tabla + ALLOCATION_LABEL_DROP - 0.004,
+                series_color(i))
+        figure.text(columna_x + 0.016, tope_tabla + ALLOCATION_LABEL_DROP,
+                    nombre.upper(), color=NAVY, fontsize=8, fontweight="semibold",
+                    va="top")
+        ax = figure.add_axes((columna_x, ANNEX_BOTTOM, ancho, alto_tabla))
+        ax.axis("off")
+        _draw_table(ax, columnas, filas[:visibles], fontsize)
+
+    _footnote(figure, footnote)
+    pdf.savefig(figure)
+    page_no += 1
+
+    # Lo que no cupo debajo de la gráfica sigue en su propia hoja, con la misma
+    # disposición de una tabla por estrategia.
+    resto = [(nombre, filas[visibles:]) for nombre, filas in bloques]
+    if any(filas for _, filas in resto):
+        page_no = _topic_page(
+            pdf, options, page_no,
+            _AnnexTable(number=0, kind=ALLOCATION, columns=columnas,
+                        per_strategy=[(n, f) for n, f in resto if f],
+                        footnote=footnote),
+            eyebrow="Asignación de activos",
+            lede="Asignación de activos (continúa)",
+        )
     return page_no
 
 
@@ -1052,12 +1184,6 @@ def _build_annex(
     Solo entra la tabla de una sección que el usuario haya pedido: un anexo con
     el detalle de una gráfica que no está en el documento no lo entendería nadie.
     """
-    pesos: dict[str, list[list[str]]] = {}
-    if options.include_allocation:
-        columnas = ["Clase de activo", "Sub-clase", "Peso"]
-        for row in allocation_table_rows(scenario, options.resolver):
-            pesos.setdefault(row["Estrategia"], []).append([row[c] for c in columnas])
-
     distribuciones: dict[tuple[str, bool], list[list[str]]] = {}
     if options.include_distribution:
         # Las dos unidades, siempre: la nominal es la que verá en su extracto y
@@ -1072,12 +1198,8 @@ def _build_annex(
     for i, strategy in enumerate(result.strategies):
         bloques: list[_AnnexBlock] = []
 
-        if pesos.get(strategy.name):
-            bloques.append(_AnnexBlock(
-                ALLOCATION, ["Clase de activo", "Sub-clase", "Peso"],
-                pesos[strategy.name],
-            ))
-
+        # La asignación **no** entra: vive debajo de su propia gráfica, en el
+        # cuerpo, que es donde hace falta leerla.
         for kind, es_real in ((DISTRIBUTION, False), (DISTRIBUTION_REAL, True)):
             filas = distribuciones.get((strategy.name, es_real))
             if filas:
@@ -1205,17 +1327,11 @@ def build_report(
             page = _inputs_pages(pdf, options, page, scenario)
 
         if options.include_allocation:
-            page = _chart_page(
-                pdf, options, page, "Asignación de activos",
-                lambda canvas: draw_allocation_chart(
-                    canvas, scenario, options.resolver, ALLOCATION_TITLE_X
-                ),
-                _cite(
-                    annex, ALLOCATION,
-                    "Los pesos están normalizados sobre el total cargado de cada "
-                    "estrategia.",
-                ),
-                rect=ALLOCATION_RECT,
+            page = _allocation_page(
+                pdf, options, page, scenario,
+                "Los pesos están normalizados sobre el total cargado de cada "
+                "estrategia. La agrupación en clases es una vista de lectura: los "
+                "pesos se cargan siempre por sub-clase.",
             )
 
         # Los supuestos resumen van **antes** de la proyección: dicen con qué
@@ -1262,8 +1378,9 @@ def build_report(
             page = _strategy_annex_page(
                 pdf, options, page, anexo,
                 footnote=(
-                    "Pesos normalizados sobre el total cargado de la estrategia. "
-                    "Percentiles calculados sobre los caminos simulados."
+                    "Percentiles calculados sobre los caminos simulados, sin suponer "
+                    "forma de distribución. La asignación de esta estrategia va con "
+                    "su gráfica, en el cuerpo del informe."
                 ),
             )
 

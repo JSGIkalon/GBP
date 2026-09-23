@@ -269,17 +269,19 @@ desincronizarse de lo que el usuario vio. El adaptador `_FigureCanvas` finge ser
 el lienzo de Qt (`clear`, `set_hover_probe`, `finish`) sobre una figura suelta.
 El precio es paginar las tablas a mano, en `_table_pages`.
 
-**Estructura**: portada · supuestos del caso · asignación de activos ·
-**supuestos resumen** · distribución nominal · distribución en moneda de hoy ·
-deuda · **anexo**.
+**Estructura**: portada · supuestos del caso · **asignación de activos con su
+tabla debajo** · **supuestos resumen** · distribución nominal · distribución en
+moneda de hoy · deuda · **anexo**.
 
-**La única tabla del cuerpo son los supuestos resumen**, y va justo antes de la
-proyección que explican. Las demás viven en el anexo, y ahí **cada estrategia
-ocupa una hoja** (`_strategy_annex_page`): su asignación, su proyección en las
-dos unidades y su deuda, repartidas en dos columnas por su alto real. La ficha
-completa de una estrategia es una página que se arranca y se entrega; por tema,
-había que recorrer el anexo entero para armarla. Cada gráfica cita el rango de
-hojas con `_cite`: *"Detalle en el Anexo · Hojas 1 a 3"*.
+**La tabla de una gráfica va debajo de esa gráfica, no en el anexo**: los
+supuestos resumen antes de la proyección que explican, y la asignación bajo su
+propia lámina (`_allocation_page`), que es el detalle exacto de las barras que se
+tienen delante. Las demás viven en el anexo, y ahí **cada estrategia ocupa una
+hoja** (`_strategy_annex_page`): su proyección en las dos unidades y su deuda,
+repartidas en dos columnas por su alto real. La ficha completa de una estrategia
+es una página que se arranca y se entrega; por tema, había que recorrer el anexo
+entero para armarla. Cada gráfica cita el rango de hojas con `_cite`:
+*"Detalle en el Anexo · Hojas 1 a 3"*.
 
 Detrás va una hoja más con los **ingresos y retiros año por año** (`_flows_table`),
 una tabla por estrategia. No cabe en la retícula de una ficha porque tiene una
@@ -294,9 +296,16 @@ Cuatro reglas que conviene no deshacer:
   `_build_annex`. Las gráficas del cuerpo los citan y el PDF se escribe de una
   sola pasada con `PdfPages`; sin reservarlos primero harían falta dos.
 - **Cuántas filas caben se calcula, no se fija.** `_rows_that_fit` lo deriva del
-  cuerpo de letra: el alto de celda de matplotlib depende de la fuente y de la
-  altura de la **figura**, no de la del eje. Con el número fijo que había antes,
-  una tabla de treinta filas se salía por debajo de la hoja.
+  cuerpo de letra. Con el número fijo que había antes, una tabla de treinta filas
+  se salía por debajo de la hoja.
+- **El alto de fila y el ancho de columna los impone `_draw_table`.** matplotlib
+  fija el alto de celda al crear la tabla, a partir de los rcParams, y
+  `set_fontsize` después solo cambia el texto: una tabla a 5.5 puntos conservaba
+  filas de 8 y desbordaba la hoja aunque la cuenta dijera que cabía. Las columnas
+  nacen todas del mismo ancho, así que "Renta variable" escupía su texto sobre la
+  vecina mientras "Peso" sobraba de sitio; ahora cada una se lleva lo que pide su
+  texto más largo (`_column_weights`), y de ahí sale también el cuerpo con que
+  una tabla entra en un ancho dado (`_fit_fontsize`).
 - **Las páginas de gráfico no llevan titular propio.** Cada gráfico ya abre con
   su frase descriptiva, que es una regla del manual y vive dentro de la función
   que lo dibuja. Poner otro encima lo duplica palabra por palabra.

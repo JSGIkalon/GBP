@@ -416,6 +416,38 @@ Activos propios: la app deja de servir solo para patrimonios en EE.UU.
   camino es dejar elegir un activo de referencia concreto — la regla está
   aislada en `extend_correlations`, así que no obliga a rehacer nada.
 
+## Sesión 15 — 22 sep 2026
+
+La tabla de asignación baja del anexo al cuerpo, debajo de su gráfica.
+
+**Hecho**
+
+- **La asignación de activos se lee donde se mira.** `_allocation_page` pone la
+  tabla en la misma hoja que la gráfica, debajo, con una tabla por estrategia.
+  Sale del anexo, que obligaba a pasar diez hojas para leer la cifra de la barra
+  que se tenía delante. El anexo por estrategia queda con proyección y deuda.
+- La tabla se lleva el alto que pide hasta un tope; si se pasa por una o dos
+  filas **encoge medio punto de letra** antes que partirse, porque una hoja de
+  continuación para una fila suelta es peor negocio. Si aun así no cabe, el resto
+  sigue en su propia hoja.
+
+**Decisiones y hallazgos**
+
+- **Las columnas de una tabla de matplotlib nacen todas iguales de anchas**, y
+  eso rompía la tabla de asignación: "Renta variable" escupía su texto encima de
+  "Renta Fija Colombiana" mientras la columna de peso sobraba de sitio. Ahora
+  cada columna se lleva el ancho que pide su texto más largo (`_column_weights`),
+  y de ahí sale también el cuerpo con que la tabla entra en un ancho dado
+  (`_fit_fontsize`). Se acabó el `COLUMN_INCHES` calibrado a ojo sobre una
+  columna numérica.
+- **`set_fontsize` no cambia el alto de fila.** matplotlib lo fija al crear la
+  tabla, a partir del cuerpo de los rcParams: una tabla a 5.5 puntos conservaba
+  filas de 8 y se salía de la hoja aunque `_rows_that_fit` dijera que cabía. Se
+  descubrió mirando el PDF, se confirmó midiendo la celda a cuatro cuerpos
+  distintos —el alto no se movía— y se resolvió imponiendo el alto en
+  `_draw_table`, con lo que la cuenta pasa a ser cierta por construcción.
+  El bug venía de la sesión anterior y afectaba a todas las tablas del informe.
+
 ## Sesión 14 — 22 sep 2026
 
 El ajuste por inflación deja de ser una opción, un solo retorno en la tabla de

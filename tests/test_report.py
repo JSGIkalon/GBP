@@ -153,14 +153,15 @@ def test_el_anexo_trae_una_hoja_por_estrategia_con_todas_sus_tablas(corrida):
     assert [a.name for a in annex] == nombres
     assert [a.number for a in annex] == list(range(1, len(annex) + 1))
     for anexo in annex:
-        # Asignacion, distribucion nominal, distribucion real y deuda, todas en
-        # la misma hoja. Los supuestos resumen NO estan: son la unica tabla que
-        # va en el cuerpo.
+        # Distribucion nominal, distribucion real y deuda, todas en la misma
+        # hoja. Los supuestos resumen y la asignacion NO estan: van en el
+        # cuerpo, cada una junto a la grafica que explican.
         assert [b.kind for b in anexo.blocks] == [
-            ALLOCATION, DISTRIBUTION, DISTRIBUTION_REAL, DEBT
+            DISTRIBUTION, DISTRIBUTION_REAL, DEBT
         ]
         assert all(b.rows for b in anexo.blocks), "Una tabla salio vacia"
         assert anexo.block(SUMMARY) is None
+        assert anexo.block(ALLOCATION) is None
 
 
 def test_la_distribucion_sale_en_las_dos_unidades_y_con_cifras_distintas(corrida):
@@ -198,8 +199,29 @@ def test_una_seccion_excluida_no_deja_su_tabla_en_el_anexo(corrida):
         ReportOptions(include_distribution=False, include_summary=False),
         escenario, result, years, False,
     )
-    assert {b.kind for a in annex for b in a.blocks} == {ALLOCATION}
+    assert annex == []
     assert _cite(annex, DISTRIBUTION, "Nota.") == "Nota."  # no cita lo que no existe
+
+
+def test_la_asignacion_va_con_su_grafica_y_no_en_el_anexo(corrida, tmp_path):
+    """La tabla es el detalle exacto de la grafica que se tiene delante.
+
+    Se verifica por paginas: la seccion de asignacion no gasta ninguna hoja
+    extra, porque la tabla comparte pagina con su grafica.
+    """
+    escenario, result, settings = corrida
+    solo = dict(include_distribution=False, include_summary=False,
+                include_debt=False, include_inputs=False, include_flows=False)
+    con = build_report(
+        tmp_path / "con.pdf", ReportOptions(**solo),
+        escenario, result, settings,
+    )
+    sin = build_report(
+        tmp_path / "sin.pdf", ReportOptions(include_allocation=False, **solo),
+        escenario, result, settings,
+    )
+    assert _paginas(sin) == 1                # solo la portada
+    assert _paginas(con) == 2                # portada y la lamina, tabla incluida
 
 
 def test_el_anexo_gasta_una_hoja_por_estrategia(corrida, tmp_path):

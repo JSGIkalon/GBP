@@ -112,9 +112,9 @@ class ExportDialog(QDialog):
         # Justo antes del aviso legal, que es el orden en que salen en el PDF.
         sections_layout.insertWidget(4, self.debt)
         annex_note = QLabel(
-            "En el cuerpo la única tabla son los supuestos resumen. Las demás salen "
-            "al final, en un anexo con una hoja por estrategia que reúne toda su "
-            "información y que cada gráfica cita. Se incluyen con su sección."
+            "Los supuestos resumen y la asignación llevan su tabla debajo de su "
+            "propia gráfica. Las demás salen al final, en un anexo con una hoja por "
+            "estrategia que cada gráfica cita. Se incluyen con su sección."
         )
         annex_note.setWordWrap(True)
         annex_note.setStyleSheet(f"color: {INK_SOFT};")
