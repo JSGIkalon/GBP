@@ -445,6 +445,11 @@ Pesos colombianos en el modelo, y lectura de las cifras en Ajustes.
   fijo sobre los resultados y cada columna o fila de montos dicen la unidad
   («millones de COP»). El PDF lo repite en la portada y en las notas.
 - **Esquema de caso 6.** Un caso anterior abre todo en USD.
+- **Etiquetas de los gráficos siempre horizontales.** Ya no se rotan. Si no
+  caben, el gráfico sube de escala (miles, millones, miles de millones) y el eje
+  lo dice. Las etiquetas se miden con el renderizador (contra otras etiquetas y
+  contra las cajas vecinas), y en la app se vuelven a medir al cambiar el tamaño
+  de la ventana.
 - Tests nuevos: conversión de un activo en COP, flujo en COP (y paridad), caso
   sin tasa, vista con la tasa de cada año, escala, esquema 6. 143 en verde. La
   huella del motor no cambió.

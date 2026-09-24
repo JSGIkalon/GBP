@@ -186,14 +186,14 @@ def display_scale() -> str:
     return _display_scale
 
 
-def format_display(value: float) -> str:
-    """Una cifra de resultado en la escala elegida en Ajustes.
+def format_display(value: float, scale: str | None = None) -> str:
+    """Una cifra de resultado en la escala elegida en Ajustes (o en `scale`).
 
     En la escala normal es exactamente `format_money`. En miles o millones
     lleva un decimal —con coma, a la colombiana— para no perder la diferencia
     entre 1,1 y 1,2 millones: 1.154.785 en millones es «1,2».
     """
-    divisor, _ = SCALES[_display_scale]
+    divisor, _ = SCALES[scale or _display_scale]
     if divisor == 1.0:
         return format_money(value)
     scaled = value / divisor
@@ -202,9 +202,16 @@ def format_display(value: float) -> str:
     return f"{scaled:,.1f}".replace(",", "_").replace(".", ",").replace("_", ".")
 
 
-def amount_unit(currency: str = "") -> str:
+def larger_scales(start: str | None = None) -> list[str]:
+    """La escala dada y las mayores, en orden: para los gráficos que buscan una
+    donde sus etiquetas quepan horizontales."""
+    keys = list(SCALES)
+    return keys[keys.index(start or _display_scale):]
+
+
+def amount_unit(currency: str = "", scale: str | None = None) -> str:
     """Rótulo de la unidad de las cifras: «millones de COP», «COP», «miles» o ""."""
-    _, name = SCALES[_display_scale]
+    _, name = SCALES[scale or _display_scale]
     if name and currency:
         return f"{name} de {currency}"
     return name or currency
@@ -223,13 +230,13 @@ def use_thousands_dot(spinbox) -> None:
     spinbox.setGroupSeparatorShown(True)
 
 
-def money_axis(ax, axis: str = "y") -> None:
-    """Rótulos del eje con la cifra completa y punto de miles."""
+def money_axis(ax, axis: str = "y", scale: str | None = None) -> None:
+    """Rótulos del eje en la escala de lectura (o en la que eligió el gráfico)."""
     from matplotlib.ticker import FuncFormatter
 
     def tick(v, _pos):
         # Las marcas del eje son números redondos: «500.000» y no «500.000,0».
-        text = format_display(v)
+        text = format_display(v, scale)
         return text[:-2] if text.endswith(",0") else text
 
     formatter = FuncFormatter(tick)

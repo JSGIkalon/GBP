@@ -182,6 +182,9 @@ class _FigureCanvas:
     def set_hover_probe(self, _probe):
         pass
 
+    def layout_now(self):
+        pass  # en el papel el eje tiene un rect fijo: ya está en su tamaño final
+
     def finish(self):
         pass
 

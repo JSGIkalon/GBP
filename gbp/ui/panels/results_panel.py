@@ -243,10 +243,15 @@ class ResultsPanel(QTabWidget):
 
     def _draw_distributions(self):
         for canvas, real in ((self.box_canvas, False), (self.real_canvas, True)):
-            draw_box_chart(
-                canvas, self.result, self.years, real,
-                show_percentile_labels=self.show_percentile_labels,
-            )
+            def draw(canvas=canvas, real=real):
+                draw_box_chart(
+                    canvas, self.result, self.years, real,
+                    show_percentile_labels=self.show_percentile_labels,
+                )
+            draw()
+            # Con otro tamaño de ventana puede caber otra escala: se vuelve a
+            # dibujar, con los datos de ese momento.
+            canvas.set_redraw(draw if self.result is not None else None)
 
     def clear(self):
         self.base_result = None
@@ -254,6 +259,7 @@ class ResultsPanel(QTabWidget):
         self.years = []
         self.goals_table.setRowCount(0)
         for canvas in (self.box_canvas, self.real_canvas, self.debt_canvas):
+            canvas.set_redraw(None)
             canvas.show_message(EMPTY)
         for table in (self.range_table, self.real_table, self.summary_table, self.debt_table,
                       self.flows_table):

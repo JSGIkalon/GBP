@@ -11,6 +11,7 @@ from collections.abc import Callable
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QSizePolicy
 
 from ..theme import INK, INK_SOFT, LEADER, SURFACE, apply_matplotlib_style
@@ -35,6 +36,27 @@ class ChartCanvas(FigureCanvasQTAgg):
         self._background = None
         self.mpl_connect("draw_event", self._on_draw)
         self.mpl_connect("motion_notify_event", self._on_motion)
+
+        # Un gráfico que decide su maquetación midiendo sus etiquetas —el box
+        # plot elige la escala en que caben horizontales— tiene que volver a
+        # decidir si la ventana cambia de tamaño: con otro ancho, otra escala.
+        self._redraw = None
+        self._resize_timer = QTimer(self)
+        self._resize_timer.setSingleShot(True)
+        self._resize_timer.timeout.connect(self._on_resized)
+
+    def set_redraw(self, fn):
+        """Cómo volver a dibujar este gráfico desde cero, o `None`."""
+        self._redraw = fn
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._redraw is not None:
+            self._resize_timer.start(150)
+
+    def _on_resized(self):
+        if self._redraw is not None:
+            self._redraw()
 
     def _on_draw(self, _event):
         self._background = self.copy_from_bbox(self.figure.bbox)
@@ -121,6 +143,14 @@ class ChartCanvas(FigureCanvasQTAgg):
             annotation.set_text(text)
         annotation.set_visible(True)
         self._blit()
+
+    def layout_now(self):
+        """Ajusta márgenes ya, para que un gráfico mida sus etiquetas con el
+        ancho real del eje y no con el de antes del ajuste."""
+        try:
+            self.figure.tight_layout()
+        except Exception:
+            pass
 
     def finish(self):
         """Ajusta márgenes y repinta."""

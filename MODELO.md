@@ -615,6 +615,8 @@ La moneda de hoy en COP descuenta la inflación colombiana, $W^{\text{COP,real}}
 
 En Ajustes también se elige ver las cifras en unidades, miles, millones o miles de millones. Divide lo que se lee —tablas, gráficos, informe— y cada rótulo lo dice. Nunca toca los campos donde se escriben montos, que siguen en cifra completa.
 
+Las etiquetas de los gráficos van **siempre horizontales**. Si con la escala elegida no caben, porque se tocarían con la vecina o invadirían otra caja, el gráfico pasa solo a la siguiente escala hasta que quepan a tamaño normal. El eje dice en qué escala quedó. Se mide con el renderizador sobre el eje ya maquetado, y en la app se vuelve a medir cuando la ventana cambia de tamaño.
+
 ---
 
 ## 14. Activos fuera del LTCMA

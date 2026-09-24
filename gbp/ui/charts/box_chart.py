@@ -23,6 +23,7 @@ from ..theme import (
     amount_unit,
     clean_axes,
     format_display,
+    larger_scales,
     money_axis,
     series_color,
     series_text_color,
@@ -73,16 +74,6 @@ def draw_box_chart(
 
     raw_stats = [_box_stats(s, years, real) for s in result.strategies]
 
-    # ¿Caben las cinco etiquetas por caja, o solo la mediana? Con cifras
-    # completas el umbral depende del largo de la cifra más larga: 44.011.596
-    # pide casi el doble de ancho que el «44» en millones de antes.
-    digits = max(
-        len(format_display(stat[k])) for stats in raw_stats for stat in stats
-        for k in ("whishi", "whislo")
-    )
-    axis_fraction = box_width / max(len(years), 1)
-    label_all = axis_fraction >= MIN_WIDTH_FOR_LABELS * digits / CALIBRATION_DIGITS
-
     stats_by_mark: list[tuple[float, float, str, dict]] = []
     boxes_to_label: list[tuple[float, dict, str]] = []
 
@@ -114,29 +105,21 @@ def draw_box_chart(
 
     ax.set_xticks(positions_base)
     ax.set_xticklabels([f"Año {y}" for y in years])
-    unidad = amount_unit(result.currency)
-    moneda = f" ({unidad})" if unidad else ""
-    ax.set_ylabel(
-        f"Patrimonio neto{moneda}, en moneda de hoy" if real else f"Patrimonio neto{moneda}"
-    )
     ax.axhline(0, color=BASELINE, linewidth=1, zorder=1)
     clean_axes(ax)
-    money_axis(ax)
+
+    def set_scale(scale):
+        unidad = amount_unit(result.currency, scale)
+        moneda = f" ({unidad})" if unidad else ""
+        ax.set_ylabel(
+            f"Patrimonio neto{moneda}, en moneda de hoy" if real else f"Patrimonio neto{moneda}"
+        )
+        money_axis(ax, scale=scale)
+
     # Aire arriba y abajo: para las etiquetas de p10/p90 y, con dos o más
     # estrategias, para la leyenda sobre el eje.
     ax.margins(y=0.12)
     ax.tick_params(axis="x", pad=12)
-
-    # Las etiquetas se ponen al final, cuando el eje Y ya tiene su rango
-    # definitivo: sin él no se puede saber si una caja tiene alto suficiente
-    # para que sus cuartiles no se encabalguen con la mediana.
-    span = float(np.ptp(ax.get_ylim())) or 1.0
-    median_style = _median_style(canvas.figure, ax, group_width / n_strategies, len(years),
-                                 digits)
-    for pos, stat, on_fill, fill in boxes_to_label:
-        _label_box(ax, pos, stat, on_fill, fill, label_all and show_percentile_labels, span,
-                   median_style)
-
     if n_strategies >= 2:
         # Sin `mode="expand"`: estiraba las entradas a los extremos opuestos del
         # eje y con dos estrategias parecía un error de maquetación.
@@ -148,6 +131,34 @@ def draw_box_chart(
             columnspacing=1.6,
             handlelength=1.4,
         )
+
+    # La escala del gráfico: la de Ajustes, o una mayor si con ella las
+    # etiquetas no caben horizontales. Se mide con los márgenes ya puestos
+    # —con la escala de Ajustes, que es la de rótulos más largos—, porque el
+    # ancho útil del eje depende de ellos. Todo el gráfico usa la misma escala
+    # y el rótulo del eje la dice.
+    set_scale(None)
+    canvas.layout_now()
+    style = _chart_style(ax, boxes_to_label, box_width)
+    scale = style["scale"]
+    set_scale(scale)
+
+    # ¿Caben las cinco etiquetas por caja, o solo la mediana? El umbral
+    # depende del largo de la cifra más larga en la escala elegida.
+    digits = max(
+        len(format_display(stat[k], scale)) for stats in raw_stats for stat in stats
+        for k in ("whishi", "whislo")
+    )
+    axis_fraction = box_width / max(len(years), 1)
+    label_all = axis_fraction >= MIN_WIDTH_FOR_LABELS * digits / CALIBRATION_DIGITS
+
+    # Las etiquetas se ponen al final, cuando el eje Y ya tiene su rango
+    # definitivo: sin él no se puede saber si una caja tiene alto suficiente
+    # para que sus cuartiles no se encabalguen con la mediana.
+    span = float(np.ptp(ax.get_ylim())) or 1.0
+    for pos, stat, on_fill, fill in boxes_to_label:
+        _label_box(ax, pos, stat, on_fill, fill, label_all and show_percentile_labels, span,
+                   style)
 
     # La nota va **dentro del eje**, no colgando por debajo en coordenadas de
     # eje: con `xy=(0, -0.16)` caía fuera del área de trazado y, en la geometría
@@ -163,7 +174,9 @@ def draw_box_chart(
             return None
         for pos, width, name, stat in stats_by_mark:
             if abs(x_data - pos) <= width / 2 and stat["whislo"] <= y_data <= stat["whishi"]:
-                m = format_display
+                def m(v):
+                    return format_display(v, scale)
+
                 return (
                     f"{name}\n"
                     f"p90   {m(stat['whishi'])}\n"
@@ -184,49 +197,88 @@ def draw_box_chart(
 MIN_GAP = 0.055
 
 
-# Ancho medio de un carácter en negrita, en fracciones del tamaño de letra.
-# Las cifras y los puntos de miles de Jost rondan 0,6 em.
-CHAR_WIDTH_EM = 0.62
+# Tamaño de la mediana, y el mínimo legible antes de pasar a otra escala.
 MEDIAN_FONT = 8.0
 MIN_MEDIAN_FONT = 6.5
 
 
-def _median_style(figure, ax, slot: float, n_years: int, digits: int) -> dict:
-    """Tamaño y orientación de la etiqueta de la mediana.
+def _renderer(figure):
+    canvas = getattr(figure, "canvas", None)
+    if canvas is not None and hasattr(canvas, "get_renderer"):
+        return canvas.get_renderer()
+    return figure._get_renderer()
+
+
+def _medians_fit(ax, boxes, box_width: float, scale: str, fontsize: float) -> bool:
+    """Si las medianas, puestas horizontales, no tocan otra etiqueta ni otra caja.
+
+    Se **miden** con el renderizador en vez de estimarlas por número de
+    caracteres: la estimación fallaba justo en el caso que importa, tres
+    estrategias con cifras completas, y las etiquetas se pisaban. Una etiqueta
+    puede ser más ancha que su propia caja, pero no puede invadir la vecina.
+    """
+    renderer = _renderer(ax.figure)
+    to_px = ax.transData.transform
+    gap = 5.0  # píxeles de aire hasta lo vecino
+    labels, cajas = [], []
+    for pos, stat, *_ in boxes:
+        text = ax.text(pos, stat["med"], format_display(stat["med"], scale),
+                       ha="center", va="center", fontsize=fontsize, fontweight="semibold")
+        bbox = text.get_window_extent(renderer)
+        text.remove()
+        labels.append((bbox.x0 - gap, bbox.x1 + gap, bbox.y0, bbox.y1))
+        (x0, y0), (x1, y1) = to_px([(pos - box_width / 2, stat["q1"]),
+                                    (pos + box_width / 2, stat["q3"])])
+        cajas.append((x0, x1, min(y0, y1), max(y0, y1)))
+
+    def hit(a, b):
+        return a[0] < b[1] and b[0] < a[1] and a[2] < b[3] and b[2] < a[3]
+
+    for i, label in enumerate(labels):
+        for j in range(len(labels)):
+            if j != i and (hit(label, labels[j]) or hit(label, cajas[j])):
+                return False
+    return True
+
+
+def _chart_style(ax, boxes, box_width: float) -> dict:
+    """Escala y tamaño de letra de las etiquetas: **siempre horizontales**.
 
     Con cifras completas la mediana de una caja puede ser más ancha que el
-    espacio hasta la caja vecina, y con tres estrategias las etiquetas se
-    montaban unas sobre otras. Se achica la letra hasta que quepa; si ni al
-    mínimo legible cabe, la etiqueta va **vertical** dentro de la caja, que
-    siempre es más alta que ancha en ese caso.
+    espacio hasta la caja vecina. Primero se achica la letra, hasta un mínimo
+    legible; si ni así caben, el gráfico pasa a la siguiente escala —de la
+    elegida en Ajustes a miles, millones o miles de millones— hasta que quepan.
+    El eje dice en qué escala quedó. Las etiquetas nunca van verticales.
     """
-    ax_width_pts = figure.get_figwidth() * 72 * ax.get_position().width
-    slot_pts = ax_width_pts * slot / max(n_years, 1)
-    fits = slot_pts * 0.92 / (digits * CHAR_WIDTH_EM)
-    if fits >= MIN_MEDIAN_FONT:
-        return {"fontsize": min(MEDIAN_FONT, fits), "rotation": 0}
-    return {"fontsize": 7.0, "rotation": 90}
+    scales = larger_scales()
+    # Antes una escala mayor con letra normal que una cifra diminuta: la letra
+    # solo se achica si ni en miles de millones cabe a tamaño normal.
+    for fontsize in (MEDIAN_FONT, 7.0, MIN_MEDIAN_FONT):
+        for scale in scales:
+            if _medians_fit(ax, boxes, box_width, scale, fontsize):
+                return {"scale": scale, "fontsize": fontsize}
+    return {"scale": scales[-1], "fontsize": MIN_MEDIAN_FONT}
 
 
 def _label_box(
     ax, pos: float, stat: dict, on_fill: str, fill: str, label_all: bool, span: float,
-    median_style: dict | None = None,
+    style: dict | None = None,
 ):
-    """Etiquetas numéricas, con la cifra completa y sin decimales.
+    """Etiquetas numéricas, horizontales, en la escala del gráfico.
 
     La mediana y los extremos de la línea vertical van siempre. Los cuartiles se
     omiten cuando la caja es tan baja que su etiqueta chocaría con la de la
     mediana: el valor sigue estando en la tabla y al pasar el mouse.
     """
-    style = median_style or {"fontsize": MEDIAN_FONT, "rotation": 0}
+    style = style or {"fontsize": MEDIAN_FONT, "scale": None}
+    scale = style["scale"]
     ax.text(
         pos,
         stat["med"],
-        format_display(stat["med"]),
+        format_display(stat["med"], scale),
         ha="center",
         va="center",
         fontsize=style["fontsize"],
-        rotation=style["rotation"],
         fontweight="semibold",
         color=on_fill,
         zorder=6,
@@ -238,7 +290,7 @@ def _label_box(
         return
 
     for value, va in ((stat["whishi"], "bottom"), (stat["whislo"], "top")):
-        ax.text(pos, value, format_display(value), ha="center", va=va, fontsize=7,
+        ax.text(pos, value, format_display(value, scale), ha="center", va=va, fontsize=7,
                 color=INK_SOFT, zorder=5)
 
     for value, va, reference in (
@@ -249,7 +301,7 @@ def _label_box(
         room_from_whisker = abs(reference - value) / span
         if room_from_median < MIN_GAP or room_from_whisker < MIN_GAP:
             continue
-        ax.text(pos, value, format_display(value), ha="center", va=va, fontsize=7,
+        ax.text(pos, value, format_display(value, scale), ha="center", va=va, fontsize=7,
                 color=INK_SOFT, zorder=5)
 
 
