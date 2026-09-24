@@ -29,12 +29,33 @@ class ChartCanvas(FigureCanvasQTAgg):
 
         self._hover_probe: Callable[[float, float, object], str | None] | None = None
         self._annotation = None
+        # Foto del gráfico sin tooltip, tomada en cada dibujo completo. Mover el
+        # mouse repinta solo el tooltip encima de esta foto (blitting) en vez de
+        # redibujar cajas, ejes y etiquetas en cada evento de movimiento.
+        self._background = None
+        self.mpl_connect("draw_event", self._on_draw)
         self.mpl_connect("motion_notify_event", self._on_motion)
+
+    def _on_draw(self, _event):
+        self._background = self.copy_from_bbox(self.figure.bbox)
+        if self._annotation is not None and self._annotation.get_visible():
+            self.figure.draw_artist(self._annotation)
+
+    def _blit(self):
+        """Repinta solo el tooltip; si aún no hay foto, un dibujo completo."""
+        if self._background is None:
+            self.draw_idle()
+            return
+        self.restore_region(self._background)
+        if self._annotation is not None and self._annotation.get_visible():
+            self.figure.draw_artist(self._annotation)
+        self.blit(self.figure.bbox)
 
     def clear(self):
         """Limpia la figura y devuelve un eje nuevo."""
         self.figure.clear()
         self._annotation = None
+        self._background = None
         ax = self.figure.add_subplot(111)
         return ax
 
@@ -47,6 +68,7 @@ class ChartCanvas(FigureCanvasQTAgg):
         """
         self.figure.clear()
         self._annotation = None
+        self._background = None
         return self.figure.subplots(
             len(height_ratios), 1, height_ratios=list(height_ratios)
         )
@@ -73,6 +95,8 @@ class ChartCanvas(FigureCanvasQTAgg):
                 ),
                 zorder=1000,
                 annotation_clip=False,
+                # Fuera del dibujo normal: lo pinta `_blit` sobre la foto.
+                animated=True,
             )
             self._annotation.set_visible(False)
         return self._annotation
@@ -81,7 +105,7 @@ class ChartCanvas(FigureCanvasQTAgg):
         if self._hover_probe is None or event.inaxes is None:
             if self._annotation is not None and self._annotation.get_visible():
                 self._annotation.set_visible(False)
-                self.draw_idle()
+                self._blit()
             return
 
         text = self._hover_probe(event.xdata, event.ydata, event.inaxes)
@@ -89,13 +113,14 @@ class ChartCanvas(FigureCanvasQTAgg):
         if not text:
             if annotation.get_visible():
                 annotation.set_visible(False)
-                self.draw_idle()
+                self._blit()
             return
 
         annotation.xy = (event.xdata, event.ydata)
-        annotation.set_text(text)
+        if annotation.get_text() != text:
+            annotation.set_text(text)
         annotation.set_visible(True)
-        self.draw_idle()
+        self._blit()
 
     def finish(self):
         """Ajusta márgenes y repinta."""
@@ -110,6 +135,7 @@ class ChartCanvas(FigureCanvasQTAgg):
         """Estado vacío: un mensaje centrado en vez de un gráfico en blanco."""
         self.figure.clear()
         self._annotation = None
+        self._background = None
         ax = self.figure.add_subplot(111)
         ax.axis("off")
         ax.text(

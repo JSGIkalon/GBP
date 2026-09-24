@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 from ...io import library
 from ...model.assets import AssetClass, CMASet
 from ...model.groups import group_of
-from ..theme import NEUTRAL
+from ..theme import INK, INK_SOFT, NEUTRAL
 
 COLUMNS = [
     "Clase de activo", "Origen", "Clase", "Retorno compuesto %",
@@ -66,7 +66,7 @@ class AssetsPanel(QWidget):
             "dos personas con el mismo caso obtienen la misma proyección."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #3D5560;")
+        intro.setStyleSheet(f"color: {INK};")
         layout.addWidget(intro)
 
         propios = QLabel(
@@ -76,12 +76,12 @@ class AssetsPanel(QWidget):
             "otro computador."
         )
         propios.setWordWrap(True)
-        propios.setStyleSheet("color: #3D5560;")
+        propios.setStyleSheet(f"color: {INK};")
         layout.addWidget(propios)
 
         source = QLabel(self._source_note())
         source.setWordWrap(True)
-        source.setStyleSheet("color: #5B7280;")
+        source.setStyleSheet(f"color: {INK_SOFT};")
         layout.addWidget(source)
 
         filtros = QHBoxLayout()
@@ -124,7 +124,7 @@ class AssetsPanel(QWidget):
         layout.addLayout(botones)
 
         self.status = QLabel("")
-        self.status.setStyleSheet("color: #5B7280;")
+        self.status.setStyleSheet(f"color: {INK_SOFT};")
         layout.addWidget(self.status)
 
         self.reload(cmas)
@@ -175,7 +175,7 @@ class AssetsPanel(QWidget):
             asset.asset_class if asset.is_custom else group_of(asset.name)
         )
         if not asset.is_custom:
-            clase.setForeground(QBrush(QColor("#9AA4AB")))
+            clase.setForeground(QBrush(QColor(INK_SOFT)))
 
         if asset.is_custom:
             negrita = QFont()

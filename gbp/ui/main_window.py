@@ -45,8 +45,8 @@ from .panels.scenario_panel import ScenarioPanel
 from .panels.settings_panel import SettingsPanel
 from .panels.strategies_panel import StrategiesPanel
 from .sample_case import build_sample_case, empty_case
-from .theme import INK, NAVY, STYLESHEET
-from .worker import start_simulation
+from .theme import INK, INK_SOFT, NAVY, STYLESHEET
+from .worker import start_simulation, start_task
 
 FILE_FILTER = f"Casos de GBP (*{EXTENSION});;Todos los archivos (*)"
 
@@ -85,10 +85,20 @@ class MainWindow(QMainWindow):
         # haber seguido editando después de correr.
         self._run_scenario = None
         self._pending_scenario = None
+        self._export_thread = None
+        self._export_worker = None
 
         self._session_timer = QTimer(self)
         self._session_timer.setSingleShot(True)
         self._session_timer.timeout.connect(self._save_session_now)
+        # Las vistas que dependen del caso se refrescan poco después de la
+        # última edición y no con cada tecla: redibujar la asignación con
+        # `tight_layout` en cada letra del nombre del caso se notaba al escribir.
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.timeout.connect(self._refresh_dependent_views)
+        self._shown_allocation = None
+        self._shown_milestones = list(self.settings.milestone_years)
 
         self._build_ui()
         self._build_menu()
@@ -301,7 +311,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def _on_scenario_changed(self):
         self.strategies_panel.capital_panel.refresh_inherited()
-        self._refresh_dependent_views()
+        self._refresh_timer.start(200)
         self._schedule_session_save()
         self._flag_stale_results()
 
@@ -355,9 +365,17 @@ class MainWindow(QMainWindow):
             self.scenario, self.cmas, self.available_assets, self.resolver
         )
         self.correlation_panel.set_correlations(self.correlations, self.resolver)
-        self._refresh_dependent_views()
+        # El resolvedor pudo cambiar la clase de un activo: la asignación
+        # agrupada cambia aunque los pesos no.
+        self._refresh_dependent_views(force=True)
 
     def _on_settings_changed(self):
+        # El número de simulaciones no cambia lo que se ve: solo la próxima
+        # corrida. Solo los años hito obligan a redibujar.
+        milestones = list(self.settings.milestone_years)
+        if milestones == getattr(self, "_shown_milestones", None):
+            return
+        self._shown_milestones = milestones
         if self.results.result is not None:
             # El horizonte es el de la corrida, no el del caso vivo: si se
             # alargó después de simular, los hitos nuevos caerían fuera de las
@@ -366,9 +384,17 @@ class MainWindow(QMainWindow):
                 self.results.result, self.settings, self.results.result.horizon
             )
 
-    def _refresh_dependent_views(self):
+    def _refresh_dependent_views(self, force: bool = False):
+        self._refresh_timer.stop()
         self.correlation_panel.set_used_assets(self.scenario.asset_names)
-        self.results.show_allocation(self.scenario, self.resolver)
+        # La asignación solo cambia con los pesos o los nombres de estrategia;
+        # el resto de las ediciones (flujos, crédito, inflación) no la tocan.
+        allocation = tuple(
+            (s.name, tuple(sorted(s.weights.items()))) for s in self.scenario.strategies
+        )
+        if force or allocation != self._shown_allocation:
+            self._shown_allocation = allocation
+            self.results.show_allocation(self.scenario, self.resolver)
         title = self.scenario.name
         if self.current_path:
             title = f"{title} — {self.current_path.name}"
@@ -387,7 +413,7 @@ class MainWindow(QMainWindow):
         self.results.clear()
         self._run_scenario = None
         self.export_action.setEnabled(False)  # el informe siempre describe una corrida
-        self._refresh_dependent_views()
+        self._refresh_dependent_views(force=True)
         self._schedule_session_save()
 
     # ------------------------------------------------------------------
@@ -493,6 +519,9 @@ class MainWindow(QMainWindow):
         if self._thread is not None and self._thread.isRunning():
             return
 
+        self.settings_panel.commit()
+        if self._refresh_timer.isActive():
+            self._refresh_dependent_views()
         try:
             self.scenario.validate(self.cmas)
         except ValueError as exc:
@@ -594,12 +623,35 @@ class MainWindow(QMainWindow):
             path += ".pdf"
 
         dialog.remember()
-        try:
-            written = build_report(path, options, scenario, result, self.settings)
-        except (OSError, ValueError) as exc:
-            QMessageBox.critical(self, "No se pudo exportar", str(exc))
-            return
+        # El PDF se escribe en un hilo aparte: con muchas estrategias son
+        # varios segundos de matplotlib, y con la ventana congelada parecía que
+        # la app se había colgado. Se copian los settings por la misma razón que
+        # en la simulación: que un cambio a mitad no se cuele en el informe.
+        settings = deepcopy(self.settings)
+        self.export_action.setEnabled(False)
+        self.run_button.setEnabled(False)
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)
+        self.status.setText("Escribiendo el informe…")
+        self._export_thread, self._export_worker = start_task(
+            self,
+            lambda: build_report(path, options, scenario, result, settings),
+            self._on_export_finished,
+            self._on_export_failed,
+        )
 
+    def _end_export(self):
+        self.progress.setVisible(False)
+        self.run_button.setEnabled(True)
+        self.export_action.setEnabled(self.results.result is not None)
+
+    def _on_export_failed(self, message: str):
+        self._end_export()
+        self.status.setText("El informe no se pudo exportar.")
+        QMessageBox.critical(self, "No se pudo exportar", message)
+
+    def _on_export_finished(self, written):
+        self._end_export()
         self.status.setText(f"Informe exportado a {written.name}")
         if QMessageBox.question(
             self,
@@ -619,7 +671,7 @@ class MainWindow(QMainWindow):
             f"<b>Correlaciones:</b> {self.correlations.source or 'LTCMA'}<br>"
             f"<b>Clases de activo:</b> {len(self.correlations.names)}<br>"
             f"<b>Librería de supuestos:</b> {library.library_path()}<br><br>"
-            "<span style='color:#5C6770'>Las proyecciones son hipotéticas, no reflejan "
+            f"<span style='color:{INK_SOFT}'>Las proyecciones son hipotéticas, no reflejan "
             "resultados reales y no garantizan rendimientos futuros.</span>",
         )
 
@@ -631,6 +683,13 @@ class MainWindow(QMainWindow):
             if self._worker is not None:
                 self._worker.cancel()
             self._thread.wait()
+        try:
+            # Un informe a medio escribir se deja terminar: cortarlo dejaría un
+            # PDF roto con el nombre que el usuario eligió.
+            if self._export_thread is not None and self._export_thread.isRunning():
+                self._export_thread.wait()
+        except RuntimeError:
+            pass  # el hilo ya terminó y se borró solo
         # El caso en curso se guarda siempre, se haya guardado a archivo o no, y
         # **primero**: es lo que más duele perder. No reemplaza a «Guardar
         # caso»: es la red para no perder lo cargado si la app se cierra antes.

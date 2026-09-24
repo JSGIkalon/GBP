@@ -311,8 +311,6 @@ class ConflictDialog(QDialog):
         nota.setWordWrap(True)
         layout.addWidget(nota)
 
-        from PySide6.QtWidgets import QRadioButton
-
         self.opciones = [
             QRadioButton("Usar los valores del caso, solo en esta sesión"),
             QRadioButton("Adoptar los valores del caso en mi librería"),

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...model.correlation import CorrelationMatrix
+from ..theme import CYAN, INK, INK_SOFT, NAVY, NEUTRAL, WHITE
 
 
 def _mix(start: QColor, end: QColor, t: float) -> QColor:
@@ -43,10 +44,10 @@ def _cell_color(value: float) -> QColor:
     negativa— con el gris neutro en el medio. El signo siempre está escrito en
     la celda, así que la lectura no depende del color.
     """
-    neutral = QColor("#E1E6EA")
+    neutral = QColor(NEUTRAL)
     if value >= 0:
-        return _mix(neutral, QColor("#0B2A36"), value)
-    return _mix(neutral, QColor("#1BA9E6"), -value)
+        return _mix(neutral, QColor(NAVY), value)
+    return _mix(neutral, QColor(CYAN), -value)
 
 
 class HeatmapDelegate(QStyledItemDelegate):
@@ -90,7 +91,7 @@ class CorrelationPanel(QWidget):
             "LTCMA con tools/import_ltcma.py."
         )
         source.setWordWrap(True)
-        source.setStyleSheet("color: #3D5560;")
+        source.setStyleSheet(f"color: {INK};")
         layout.addWidget(source)
 
         if correlations.psd_adjustment > 0:
@@ -100,7 +101,7 @@ class CorrelationPanel(QWidget):
                 f"lo es; el ajuste máximo aplicado es de {correlations.psd_adjustment:.4f}."
             )
             note.setWordWrap(True)
-            note.setStyleSheet("color: #5B7280;")
+            note.setStyleSheet(f"color: {INK_SOFT};")
             layout.addWidget(note)
 
         controls = QHBoxLayout()
@@ -124,7 +125,7 @@ class CorrelationPanel(QWidget):
 
         self.derived_note = QLabel("")
         self.derived_note.setWordWrap(True)
-        self.derived_note.setStyleSheet("color: #5B7280;")
+        self.derived_note.setStyleSheet(f"color: {INK_SOFT};")
         self.derived_note.setVisible(False)
         layout.addWidget(self.derived_note)
 
@@ -141,8 +142,16 @@ class CorrelationPanel(QWidget):
         self._render()
 
     def set_used_assets(self, names: list[str]):
-        """Clases que las estrategias están usando; sirve para acotar la vista."""
-        self._used_names = list(names)
+        """Clases que las estrategias están usando; sirve para acotar la vista.
+
+        Se llama con cada edición del caso —cada tecla del nombre, cada peso—,
+        y rehacer la tabla son hasta 59×59 celdas con su tooltip. Solo se rehace
+        si cambió el conjunto de clases, que es lo único que esta vista muestra.
+        """
+        names = list(names)
+        if names == self._used_names:
+            return
+        self._used_names = names
         self._render()
 
     def _visible_names(self) -> list[str]:
@@ -174,9 +183,9 @@ class CorrelationPanel(QWidget):
                 item.setBackground(QBrush(_cell_color(value)))
                 # Blanco solo sobre el navy profundo; el cyan es claro y pide Ink.
                 if value > 0.6:
-                    item.setForeground(QBrush(QColor("#FFFFFF")))
+                    item.setForeground(QBrush(QColor(WHITE)))
                 else:
-                    item.setForeground(QBrush(QColor("#3D5560")))
+                    item.setForeground(QBrush(QColor(INK)))
                 propio = self.resolver is not None and (
                     self.resolver.is_custom(names[i])
                     or self.resolver.is_custom(names[j])

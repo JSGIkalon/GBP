@@ -55,10 +55,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
+
+if TYPE_CHECKING:
+    # El backend PDF se importa al exportar, no al abrir la app: es de lo que
+    # más tarda en cargar y la mayoría de las sesiones no exportan nada.
+    from matplotlib.backends.backend_pdf import PdfPages
 
 from ..model.groups import group_summary
 from .caseio import used_custom_assets
@@ -1316,6 +1321,8 @@ def build_report(
     estrategias. Detrás van los ingresos y retiros año por año, que por su largo
     —una fila por año del horizonte— no caben en esa retícula.
     """
+    from matplotlib.backends.backend_pdf import PdfPages
+
     apply_matplotlib_style()
     path = Path(path)
     # Las cifras en dinero de los supuestos resumen son nominales. La unidad ya

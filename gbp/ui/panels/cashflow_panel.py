@@ -30,7 +30,7 @@ from ...model.cashflows import (
 )
 from ...model.scenario import Scenario
 from ...model.strategy import Strategy
-from ..theme import format_money
+from ..theme import INK, INK_SOFT, format_money
 
 # Encabezados cortos: con los nombres completos la tabla no cabía en el panel
 # y Qt recortaba las últimas columnas. El significado va en el tooltip.
@@ -70,7 +70,7 @@ class CashflowPanel(QWidget):
             "vigente: el retiro sube y baja con el mercado y el portafolio no se agota."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #3D5560;")
+        intro.setStyleSheet(f"color: {INK};")
         layout.addWidget(intro)
 
         # Los botones van **encima** de la tabla, igual que en Pesos. Debajo
@@ -112,7 +112,7 @@ class CashflowPanel(QWidget):
         layout.addWidget(self.table, 1)
 
         self.summary = QLabel("")
-        self.summary.setStyleSheet("color: #5B7280;")
+        self.summary.setStyleSheet(f"color: {INK_SOFT};")
         layout.addWidget(self.summary)
 
         self.reload(scenario, strategy)

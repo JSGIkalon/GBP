@@ -88,6 +88,48 @@ class SimulationWorker(QObject):
             QThread.currentThread().quit()
 
 
+class TaskWorker(QObject):
+    """Corre una función cualquiera fuera del hilo de la interfaz.
+
+    Para trabajo que no tiene progreso por años —escribir el PDF, correr el
+    solver—, con el mismo contrato de señales que la simulación.
+    """
+
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, fn, expected=(OSError, ValueError)):
+        super().__init__()
+        self.fn = fn
+        self.expected = expected
+
+    def run(self):
+        try:
+            value = self.fn()
+        except self.expected as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            self.failed.emit(f"Falló: {exc}")
+        else:
+            self.finished.emit(value)
+        finally:
+            QThread.currentThread().quit()
+
+
+def start_task(parent, fn, on_finished, on_failed) -> tuple[QThread, TaskWorker]:
+    """Arranca `fn` en un hilo y conecta las devoluciones."""
+    thread = QThread(parent)
+    worker = TaskWorker(fn)
+    worker.moveToThread(thread)
+    thread.started.connect(worker.run)
+    worker.finished.connect(on_finished)
+    worker.failed.connect(on_failed)
+    thread.finished.connect(worker.deleteLater)
+    thread.finished.connect(thread.deleteLater)
+    thread.start()
+    return thread, worker
+
+
 def start_simulation(
     parent,
     scenario: Scenario,

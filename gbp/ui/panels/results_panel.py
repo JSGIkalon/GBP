@@ -35,7 +35,7 @@ from ..charts.allocation_chart import allocation_table_rows, draw_allocation_cha
 from ..charts.box_chart import distribution_table_rows, draw_box_chart
 from ..charts.canvas import ChartCanvas
 from ..charts.debt_chart import draw_debt_chart
-from ..theme import format_money
+from ..theme import INK_SOFT, format_money
 
 EMPTY = "Carga los datos del caso y pulsa «Correr simulación»."
 
@@ -75,6 +75,9 @@ class ResultsPanel(QTabWidget):
         # mediana es la cifra que importa y las demás siempre están en la
         # tabla de abajo, así que ocultarlas despeja la caja sin perder nada.
         self.show_percentile_labels = True
+        # Referencias explícitas a las dos casillas: buscarlas con
+        # `findChildren(QCheckBox)` alcanzaría cualquier otra casilla del panel.
+        self._percentile_toggles: list[QCheckBox] = []
 
         # --- Distribución, en las dos unidades ---------------------------
         self.range_columns = [
@@ -111,16 +114,13 @@ class ResultsPanel(QTabWidget):
             "valores nominales y en moneda de hoy."
         )
         flows_note.setWordWrap(True)
-        flows_note.setStyleSheet("color: #5B7280;")
+        flows_note.setStyleSheet(f"color: {INK_SOFT};")
         f_layout.addWidget(flows_note)
         self.addTab(flows, "Flujos y valor")
 
         # --- Supuestos --------------------------------------------------
         summary = QWidget()
         s_layout = QVBoxLayout(summary)
-        self.summary_columns = [
-            "Indicador", *[f"Estrategia {i + 1}" for i in range(8)]
-        ]
         self.summary_table = _table(["Indicador"])
         s_layout.addWidget(self.summary_table, 1)
         note = QLabel(
@@ -135,7 +135,7 @@ class ResultsPanel(QTabWidget):
             "crece o ya se está consumiendo. Las cifras en dinero son nominales."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color: #5B7280;")
+        note.setStyleSheet(f"color: {INK_SOFT};")
         s_layout.addWidget(note)
         self.addTab(summary, "Supuestos")
 
@@ -155,7 +155,7 @@ class ResultsPanel(QTabWidget):
             "cargan siempre por sub-clase."
         )
         allocation_note.setWordWrap(True)
-        allocation_note.setStyleSheet("color: #5B7280;")
+        allocation_note.setStyleSheet(f"color: {INK_SOFT};")
         a_layout.addWidget(allocation_note)
         self.addTab(allocation, "Asignación")
 
@@ -183,12 +183,13 @@ class ResultsPanel(QTabWidget):
         toggle = QCheckBox("Mostrar percentiles p10/p25/p75/p90 en el gráfico")
         toggle.setChecked(True)
         toggle.toggled.connect(self._toggle_percentile_labels)
+        self._percentile_toggles.append(toggle)
         layout.addWidget(toggle)
         table = _table(self.range_columns)
         layout.addWidget(table, 2)
         label = QLabel(note)
         label.setWordWrap(True)
-        label.setStyleSheet("color: #5B7280;")
+        label.setStyleSheet(f"color: {INK_SOFT};")
         layout.addWidget(label)
         self.addTab(page, title)
         return canvas, table
@@ -196,7 +197,7 @@ class ResultsPanel(QTabWidget):
     def _toggle_percentile_labels(self, checked: bool):
         """Un solo interruptor para las dos unidades: es la misma preferencia de lectura."""
         self.show_percentile_labels = checked
-        for checkbox in self.findChildren(QCheckBox):
+        for checkbox in self._percentile_toggles:
             checkbox.blockSignals(True)
             checkbox.setChecked(checked)
             checkbox.blockSignals(False)
@@ -275,7 +276,9 @@ class ResultsPanel(QTabWidget):
         _fill(self.flows_table, rows, self.flow_columns)
 
     # ------------------------------------------------------------------
-    def _show_summary(self, result: SimulationResult, real: bool = False):
+    def _show_summary(self, result: SimulationResult):
+        # Las cifras en dinero del resumen son nominales, como en el informe.
+        real = False
         names = result.names
         columns = ["Indicador", *names]
         self.summary_table.setColumnCount(len(columns))

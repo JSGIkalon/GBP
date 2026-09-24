@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from ...io import library
 from ...model.scenario import SimulationSettings
+from ..theme import INK, INK_SOFT
 
 
 class SettingsPanel(QWidget):
@@ -39,7 +40,7 @@ class SettingsPanel(QWidget):
             "a todos los análisis."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #3D5560;")
+        intro.setStyleSheet(f"color: {INK};")
         layout.addWidget(intro)
 
         form = QFormLayout()
@@ -49,7 +50,9 @@ class SettingsPanel(QWidget):
         self.n_paths.setRange(100, 1_000_000)
         self.n_paths.setSingleStep(1_000)
         self.n_paths.setGroupSeparatorShown(True)
-        self.n_paths.valueChanged.connect(self._on_change)
+        # Al terminar de editar y no en cada tecla: escribir 200000 eran seis
+        # guardados a disco y seis avisos a la ventana por cifras intermedias.
+        self.n_paths.editingFinished.connect(self._on_change)
         form.addRow("Número de simulaciones", self.n_paths)
 
         self.milestones = QLineEdit()
@@ -64,12 +67,12 @@ class SettingsPanel(QWidget):
             "estabiliza las colas de la distribución; bajarlo solo acelera casos de prueba."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color: #5B7280;")
+        note.setStyleSheet(f"color: {INK_SOFT};")
         layout.addWidget(note)
 
         self.path_label = QLabel("")
         self.path_label.setWordWrap(True)
-        self.path_label.setStyleSheet("color: #5B7280;")
+        self.path_label.setStyleSheet(f"color: {INK_SOFT};")
         layout.addWidget(self.path_label)
 
         reset = QPushButton("Restaurar valores por defecto")
@@ -102,12 +105,27 @@ class SettingsPanel(QWidget):
                 years.append(year)
         return sorted(set(years)) or [5, 10, 15, 20, 25, 30]
 
+    def commit(self):
+        """Aplica lo que esté escrito aunque el campo no haya perdido el foco.
+
+        La ventana lo llama antes de simular, para no correr con el número de
+        simulaciones anterior si se pulsó F5 con el cursor todavía en el campo.
+        """
+        self._on_change()
+
     def _on_change(self, *_):
         if self._loading:
             return
-        self.settings.n_paths = self.n_paths.value()
-        self.settings.milestone_years = self._parse_milestones()
-        library.save_settings(self.settings)
+        n_paths = self.n_paths.value()
+        milestones = self._parse_milestones()
+        if (n_paths, milestones) == (self.settings.n_paths, self.settings.milestone_years):
+            return
+        self.settings.n_paths = n_paths
+        self.settings.milestone_years = milestones
+        try:
+            library.save_settings(self.settings)
+        except OSError:
+            pass  # la configuración en memoria sigue valiendo para esta sesión
         self.changed.emit()
 
     def _reset(self):

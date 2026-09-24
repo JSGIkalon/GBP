@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from ...model.scenario import Scenario
 from ...model.strategy import Strategy
-from ..theme import INK_SOFT, format_money
+from ..theme import INK, INK_SOFT, format_money
 
 
 class CapitalPanel(QWidget):
@@ -41,7 +41,7 @@ class CapitalPanel(QWidget):
             "comparación mide la estrategia y no el punto de partida."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #3D5560;")
+        intro.setStyleSheet(f"color: {INK};")
         layout.addWidget(intro)
 
         self.inherited = QLabel("")

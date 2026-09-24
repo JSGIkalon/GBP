@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...model.scenario import Scenario
-from ..theme import INK_SOFT, STATUS_WARNING, format_money, status_dot
+from ..theme import INK, INK_SOFT, STATUS_WARNING, format_money, status_dot
 
 
 class ScenarioPanel(QWidget):
@@ -37,7 +37,7 @@ class ScenarioPanel(QWidget):
             "de supuestos."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet("color: #3D5560;")
+        intro.setStyleSheet(f"color: {INK};")
         layout.addWidget(intro)
 
         form = QFormLayout()
@@ -84,7 +84,7 @@ class ScenarioPanel(QWidget):
             "resultados en poder adquisitivo de hoy."
         )
         note.setWordWrap(True)
-        note.setStyleSheet("color: #5B7280;")
+        note.setStyleSheet(f"color: {INK_SOFT};")
         layout.addWidget(note)
         layout.addStretch(1)
 

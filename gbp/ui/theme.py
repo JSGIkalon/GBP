@@ -234,20 +234,6 @@ QHeaderView::section {{
     font-weight: 600;
 }}
 
-QListWidget {{
-    border: none;
-    background-color: {WHITE};
-}}
-QListWidget::item {{
-    padding: 8px 6px;
-    border-bottom: 1px solid {NEUTRAL};
-}}
-QListWidget::item:selected {{
-    background-color: {NEUTRAL};
-    color: {NAVY};
-    font-weight: 600;
-}}
-
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     background-color: {WHITE};
     border: none;
@@ -295,23 +281,6 @@ QPushButton#runButton:hover {{
 QPushButton#runButton:disabled {{
     background-color: {LEADER};
     color: {WHITE};
-}}
-
-QPushButton#secondaryButton {{
-    background-color: {WHITE};
-    color: {NAVY};
-    border: 1px solid {NAVY};
-    border-radius: 3px;
-    padding: 11px 22px;
-    font-size: 14px;
-    font-weight: 600;
-}}
-QPushButton#secondaryButton:hover {{
-    background-color: {PANEL};
-}}
-QPushButton#secondaryButton:disabled {{
-    border: 1px solid {LEADER};
-    color: {LEADER};
 }}
 
 QProgressBar {{
