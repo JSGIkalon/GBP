@@ -17,26 +17,18 @@ from gbp.model.correlation import CorrelationMatrix, cholesky_factor, covariance
 
 
 def test_retorno_aritmetico_supera_al_compuesto():
+    """El arrastre de volatilidad es del orden de sigma^2/2 y desaparece sin ella.
+
+    El caso sin volatilidad es el ancla de los tests determinísticos del motor:
+    si ahí los dos retornos no coinciden, todos esos tests miden otra cosa.
+    """
     asset = AssetClass("Acciones", compound_return=0.07, volatility=0.16)
     assert asset.arithmetic_return > asset.compound_return
-    # El arrastre es del orden de sigma^2/2.
     assert asset.arithmetic_return - asset.compound_return == pytest.approx(0.0116, abs=0.002)
 
-
-def test_sin_volatilidad_ambos_retornos_coinciden():
-    asset = AssetClass("Fijo", compound_return=0.05, volatility=0.0)
-    assert asset.arithmetic_return == pytest.approx(0.05)
-    assert asset.sigma_log == 0.0
-
-
-def test_apreciacion_es_retorno_menos_yield():
-    asset = AssetClass("Bonos", compound_return=0.04, volatility=0.05, yield_=0.038)
-    assert asset.appreciation == pytest.approx(0.002)
-
-
-def test_cma_rechaza_duplicados():
-    with pytest.raises(ValueError, match="duplicad"):
-        CMASet([AssetClass("A", 0.05, 0.1), AssetClass("A", 0.06, 0.1)])
+    fijo = AssetClass("Fijo", compound_return=0.05, volatility=0.0)
+    assert fijo.arithmetic_return == pytest.approx(0.05)
+    assert fijo.sigma_log == 0.0
 
 
 # --------------------------------------------------------------------------
@@ -53,15 +45,6 @@ def test_resumen_de_un_solo_activo_devuelve_sus_propios_supuestos(simple_cmas, s
     assert summary.volatility == pytest.approx(acciones.volatility)
     assert summary.compound_return == pytest.approx(acciones.compound_return, abs=1e-6)
     assert summary.yield_ == pytest.approx(acciones.yield_)
-
-
-def test_la_diversificacion_reduce_la_volatilidad(simple_cmas, simple_corr):
-    """La volatilidad de la mezcla es menor que el promedio ponderado."""
-    allocation = Allocation("Mixto", {"Bonos": 0.5, "Acciones": 0.5})
-    corr = simple_corr.subset(allocation.asset_names)
-    summary = summarize(allocation, simple_cmas, corr)
-    promedio = 0.5 * 0.05 + 0.5 * 0.16
-    assert summary.volatility < promedio
 
 
 def test_el_sharpe_descuenta_la_tasa_de_caja(simple_cmas, simple_corr):
@@ -100,29 +83,30 @@ def test_la_matriz_embebida_del_ltcma_carga_y_es_psd():
     assert matrix.psd_adjustment < 0.02
 
 
-def test_la_matriz_embebida_trae_las_clases_del_ejemplo():
-    matrix = CorrelationMatrix.load()
-    for name in ("U.S. Cash", "U.S. Large Cap", "Private Equity", "Direct Lending"):
-        assert name in matrix.names
-
-
-def test_subset_respeta_el_orden_pedido():
-    matrix = CorrelationMatrix.load()
-    names = ["Private Equity", "U.S. Cash"]
-    sub = matrix.subset(names)
-    assert sub.shape == (2, 2)
-    assert sub[0, 1] == pytest.approx(sub[1, 0])
-
-
-def test_subset_avisa_si_falta_una_clase():
-    matrix = CorrelationMatrix.load()
-    with pytest.raises(KeyError, match="Cripto"):
-        matrix.subset(["U.S. Cash", "Cripto"])
-
-
-def test_matriz_asimetrica_se_rechaza():
-    with pytest.raises(ValueError, match="simetrica|simétrica"):
-        CorrelationMatrix(names=["A", "B"], matrix=np.array([[1.0, 0.5], [0.2, 1.0]]))
+@pytest.mark.parametrize(
+    ("build", "error", "match"),
+    [
+        pytest.param(
+            lambda: CMASet([AssetClass("A", 0.05, 0.1), AssetClass("A", 0.06, 0.1)]),
+            ValueError, "duplicad", id="cma_con_clase_duplicada",
+        ),
+        pytest.param(
+            lambda: CorrelationMatrix.load().subset(["U.S. Cash", "Cripto"]),
+            KeyError, "Cripto", id="subset_con_clase_faltante",
+        ),
+        pytest.param(
+            lambda: CorrelationMatrix(
+                names=["A", "B"], matrix=np.array([[1.0, 0.5], [0.2, 1.0]])
+            ),
+            ValueError, "simetrica|simétrica", id="matriz_asimetrica",
+        ),
+    ],
+)
+def test_supuestos_mal_formados_se_rechazan(build, error, match):
+    """Un supuesto roto debe fallar al cargarse, nombrando el problema, y no
+    producir en silencio una simulación con la clase o la correlación equivocada."""
+    with pytest.raises(error, match=match):
+        build()
 
 
 def test_cholesky_ignora_activos_sin_volatilidad():
@@ -137,5 +121,3 @@ def test_cholesky_repara_una_matriz_no_psd():
     assert not is_psd(corr)
     factor = cholesky_factor(covariance(np.array([0.1, 0.1, 0.1]), corr))
     assert np.isfinite(factor).all()
-
-

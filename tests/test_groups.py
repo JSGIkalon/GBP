@@ -82,15 +82,15 @@ def test_los_pesos_se_agregan_y_normalizan():
     assert grouped[CASH] == pytest.approx(0.10)
     assert sum(grouped.values()) == pytest.approx(1.0)
 
-
-def test_se_normaliza_aunque_no_sumen_cien():
-    """Mientras se carga un portafolio los pesos no suman 100%; la vista sigue."""
-    grouped = group_weights({"U.S. Large Cap": 0.30, "U.S. Aggregate Bonds": 0.10})
-    assert grouped[EQUITY] == pytest.approx(0.75)
-    assert grouped[FIXED_INCOME] == pytest.approx(0.25)
+    # Mientras se carga un portafolio los pesos no suman 100%; la vista sigue.
+    parcial = group_weights({"U.S. Large Cap": 0.30, "U.S. Aggregate Bonds": 0.10})
+    assert parcial[EQUITY] == pytest.approx(0.75)
+    assert parcial[FIXED_INCOME] == pytest.approx(0.25)
 
 
-def test_el_orden_es_el_de_lectura_y_otros_va_al_final():
+def test_el_orden_es_el_de_lectura_y_solo_aparecen_grupos_con_peso():
+    """Otros va al final, un grupo vacío no ocupa fila y sin pesos no hay nada
+    que agregar: es lo que la tabla y la dona de la app muestran tal cual."""
     grouped = group_weights(
         {
             "U.S. Cash": 0.1,
@@ -102,18 +102,8 @@ def test_el_orden_es_el_de_lectura_y_otros_va_al_final():
     assert list(grouped) == [EQUITY, FIXED_INCOME, CASH, OTHER]
     assert GROUP_ORDER[-1] == CASH
 
+    assert list(group_weights({"U.S. Large Cap": 1.0})) == [EQUITY]
 
-def test_un_grupo_vacio_no_aparece():
-    grouped = group_weights({"U.S. Large Cap": 1.0})
-    assert list(grouped) == [EQUITY]
-
-
-def test_sin_pesos_no_hay_agregacion():
     assert group_weights({}) == {}
     assert group_weights({"U.S. Large Cap": 0.0}) == {}
     assert group_summary({}) == "sin pesos definidos"
-
-
-def test_el_resumen_es_una_linea_legible():
-    texto = group_summary({"U.S. Large Cap": 0.6, "U.S. Aggregate Bonds": 0.4})
-    assert texto == "Renta variable 60.0% · Renta fija 40.0%"

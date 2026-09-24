@@ -14,9 +14,15 @@ from gbp.model.assets import AssetClass, CMASet  # noqa: E402
 from gbp.model.correlation import CorrelationMatrix  # noqa: E402
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def simple_cmas() -> CMASet:
-    """Dos activos y caja, con números redondos para verificar a mano."""
+    """Dos activos y caja, con números redondos para verificar a mano.
+
+    Se comparte por módulo para que test_report simule una sola vez. Ningún
+    test la muta; el que necesite cambiar un supuesto, que arme su propio
+    CMASet (como hace test_leverage con `deterministic_cmas`, que por eso sigue
+    siendo de función).
+    """
     return CMASet(
         [
             AssetClass("U.S. Cash", compound_return=0.03, volatility=0.007, yield_=0.03),
@@ -26,7 +32,7 @@ def simple_cmas() -> CMASet:
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def simple_corr() -> CorrelationMatrix:
     matrix = np.array(
         [

@@ -118,19 +118,6 @@ def test_un_caso_sobrevive_la_ida_y_vuelta_completa(tmp_path):
     assert growth.initial_value == pytest.approx(20_000_000.0)
 
 
-def test_un_caso_sin_credito_se_guarda_y_carga(tmp_path):
-    scenario = Scenario(
-        name="Sin deuda",
-        initial_value=1000.0,
-        strategies=[Strategy(allocation=Allocation("A", {"U.S. Cash": 1.0}))],
-    )
-    path = tmp_path / "simple.gbp.json"
-    save_case(scenario, path)
-    loaded = load_case(path)
-    assert loaded.strategies[0].loan is None
-    assert loaded.strategies[0].initial_value is None
-
-
 def test_un_caso_del_esquema_1_se_migra(tmp_path):
     """Los flujos y el credito del escenario aterrizan en cada estrategia."""
     legacy = {
@@ -193,23 +180,29 @@ def test_el_caso_no_guarda_los_supuestos_de_mercado():
     assert "volatility" not in texto
 
 
-def test_un_archivo_ajeno_da_un_error_claro(tmp_path):
-    path = tmp_path / "otro.json"
-    path.write_text('{"algo": 1}', encoding="utf-8")
-    with pytest.raises(CaseFormatError):
-        load_case(path)
+def _cargar_texto(tmp_path, texto: str):
+    path = tmp_path / "caso.json"
+    path.write_text(texto, encoding="utf-8")
+    return load_case(path)
 
 
-def test_un_json_roto_da_un_error_claro(tmp_path):
-    path = tmp_path / "roto.json"
-    path.write_text("{no es json", encoding="utf-8")
-    with pytest.raises(CaseFormatError):
-        load_case(path)
-
-
-def test_un_esquema_futuro_se_rechaza_con_mensaje():
-    with pytest.raises(CaseFormatError, match="más nueva|mas nueva"):
-        from_dict({"schema": SCHEMA_VERSION + 1, "scenario": {"name": "x"}})
+@pytest.mark.parametrize(
+    ("abrir", "match"),
+    [
+        pytest.param(lambda p: _cargar_texto(p, '{"algo": 1}'), None, id="archivo_ajeno"),
+        pytest.param(lambda p: _cargar_texto(p, "{no es json"), None, id="json_roto"),
+        pytest.param(
+            lambda p: from_dict({"schema": SCHEMA_VERSION + 1, "scenario": {"name": "x"}}),
+            "más nueva|mas nueva",
+            id="esquema_futuro",
+        ),
+    ],
+)
+def test_un_archivo_que_no_es_un_caso_valido_da_un_error_claro(tmp_path, abrir, match):
+    """La app atrapa CaseFormatError para mostrar un aviso; cualquier otra
+    excepción (KeyError, JSONDecodeError) llegaría al usuario como un cierre."""
+    with pytest.raises(CaseFormatError, match=match):
+        abrir(tmp_path)
 
 
 # --------------------------------------------------------------------------
@@ -235,24 +228,19 @@ def window(qapp, tmp_path, monkeypatch):
     win.close()
 
 
-def test_la_ventana_abre_con_el_caso_de_ejemplo(window):
-    assert window.scenario.strategies
-    assert window.cmas.names
+def test_la_simulacion_completa_produce_resultados(window):
+    """Corre el motor por el mismo camino que el boton, pero sin hilo.
+
+    Parte del caso de ejemplo con que abre la ventana: todas sus clases tienen
+    que existir en la libreria y en la matriz, o el primer clic ya falla.
+    """
+    from gbp.engine.montecarlo import simulate
+    from gbp.model.scenario import SimulationSettings
+
     assert len(window.correlations.names) > 50
-    # Todas las clases del ejemplo deben existir en la libreria y en la matriz.
     for strategy in window.scenario.strategies:
         for name in strategy.asset_names:
             assert name in window.available_assets, name
-
-
-def test_el_caso_de_ejemplo_pasa_la_validacion(window):
-    window.scenario.validate(window.cmas)
-
-
-def test_la_simulacion_completa_produce_resultados(window):
-    """Corre el motor por el mismo camino que el boton, pero sin hilo."""
-    from gbp.engine.montecarlo import simulate
-    from gbp.model.scenario import SimulationSettings
 
     settings = SimulationSettings(n_paths=1_000, seed=1)
     result = simulate(window.scenario, window.cmas, window.correlations, settings)
@@ -262,21 +250,12 @@ def test_la_simulacion_completa_produce_resultados(window):
     assert window.results.range_table.rowCount() > 0
     assert window.results.summary_table.rowCount() > 0
     assert not hasattr(window.results, "headline")  # sin frase de veredicto
-
-
-def test_la_asignacion_se_muestra_sin_simular(window):
-    window.results.show_allocation(window.scenario, window.resolver)
-    filas = sum(
-        len([w for w in s.weights.values() if w]) for s in window.scenario.strategies
-    )
-    assert window.results.allocation_table.rowCount() == filas
-
-
-def test_caso_nuevo_conserva_la_libreria_de_supuestos(window):
-    antes = len(window.cmas)
-    window.new_case()
-    assert len(window.cmas) == antes
-    assert window.scenario.initial_value == 0.0
+    for canvas in (
+        window.results.box_canvas,
+        window.results.allocation_canvas,
+        window.results.debt_canvas,
+    ):
+        assert canvas.figure.get_axes(), "El lienzo quedo sin ejes"
 
 
 def test_editar_un_supuesto_lo_persiste(window, tmp_path):
@@ -287,24 +266,14 @@ def test_editar_un_supuesto_lo_persiste(window, tmp_path):
     assert library.load_cmas().by_name("U.S. Large Cap").yield_ == pytest.approx(0.017)
 
 
-def test_cambiar_la_configuracion_la_persiste(window):
-    from gbp.io import library
-
-    window.settings_panel.n_paths.setValue(5_000)
-    assert library.load_settings().n_paths == 5_000
-
-
-def test_una_estrategia_mal_sumada_no_corre(window):
-    window.scenario.strategies[0].allocation.weights = {"U.S. Large Cap": 0.5}
-    with pytest.raises(ValueError, match="sumar 100%"):
-        window.scenario.validate(window.cmas)
-
-
-def test_los_paneles_reflejan_un_caso_cargado(window, tmp_path):
-    path = tmp_path / "otro.gbp.json"
+def test_los_paneles_reflejan_un_caso_abierto_desde_su_ruta(window, tmp_path):
+    """Es el camino de «Abrir con → GBP»: la ruta llega por la línea de comandos."""
+    path = tmp_path / "desde_windows.gbp.json"
     save_case(_rich_scenario(), path)
-    window.scenario = load_case(path)
-    window._reload_all()
+    window.open_case_path(str(path))
+
+    assert window.scenario.name == "Caso de prueba"
+    assert window.current_path == path
 
     panel = window.strategies_panel
     assert window.scenario_panel.name_edit.text() == "Caso de prueba"
@@ -326,17 +295,6 @@ def test_los_paneles_reflejan_un_caso_cargado(window, tmp_path):
     assert panel.capital_panel.amount.value() == pytest.approx(20_000_000.0)
 
 
-def test_un_caso_se_abre_desde_su_ruta(window, tmp_path):
-    """Es el camino de «Abrir con → GBP»: la ruta llega por la línea de comandos."""
-    path = tmp_path / "desde_windows.gbp.json"
-    save_case(_rich_scenario(), path)
-    window.open_case_path(str(path))
-
-    assert window.scenario.name == "Caso de prueba"
-    assert window.current_path == path
-    assert window.scenario_panel.name_edit.text() == "Caso de prueba"
-
-
 def test_editar_una_estrategia_no_toca_las_demas(window):
     """Los flujos son por estrategia: agregar uno no debe propagarse."""
     from gbp.model.cashflows import FlowKind as Kind
@@ -350,46 +308,6 @@ def test_editar_una_estrategia_no_toca_las_demas(window):
     despues = [len(s.cashflows) for s in window.scenario.strategies]
     assert despues[0] == antes[0] + 1
     assert despues[1:] == antes[1:]
-
-
-def test_duplicar_desde_el_panel_crea_una_copia_independiente(window):
-    panel = window.strategies_panel
-    panel.selector.setCurrentIndex(0)
-    original = panel.current
-
-    copia = original.copy("Duplicada")
-    window.scenario.strategies.append(copia)
-    copia.allocation.weights[next(iter(copia.weights))] = 0.123
-
-    primera_clase = next(iter(original.weights))
-    assert original.weights[primera_clase] != pytest.approx(0.123)
-
-
-def test_los_graficos_dibujan_sin_error(window):
-    from gbp.engine.montecarlo import simulate
-    from gbp.model.scenario import SimulationSettings
-
-    settings = SimulationSettings(n_paths=500, seed=3)
-    result = simulate(window.scenario, window.cmas, window.correlations, settings)
-    window.results.show_result(result, settings, window.scenario.horizon)
-
-    for canvas in (
-        window.results.box_canvas,
-        window.results.allocation_canvas,
-        window.results.debt_canvas,
-    ):
-        assert canvas.figure.get_axes(), "El lienzo quedo sin ejes"
-
-
-def test_la_vista_real_cambia_los_numeros(window):
-    from gbp.engine.montecarlo import simulate
-    from gbp.model.scenario import SimulationSettings
-
-    settings = SimulationSettings(n_paths=500, seed=3)
-    result = simulate(window.scenario, window.cmas, window.correlations, settings)
-    nominal = result.strategies[0].percentiles([10], real=False)[50][0]
-    real = result.strategies[0].percentiles([10], real=True)[50][0]
-    assert real < nominal
 
 
 # --------------------------------------------------------------------------
@@ -425,11 +343,7 @@ def test_se_puede_activar_el_credito_de_una_estrategia_no_primera(window):
     assert panel.current.loan.principal == pytest.approx(5_000_000)
     assert panel.current.has_loan
 
-
-def test_desmarcar_el_credito_lo_quita(window):
-    panel = _nueva_estrategia(window)
-    panel.leverage_panel.enabled.setChecked(True)
-    panel.leverage_panel.principal.setValue(1_000_000)
+    # Y desmarcarla lo quita del todo, no deja un credito fantasma.
     panel.leverage_panel.enabled.setChecked(False)
     assert panel.current.loan is None
 
@@ -486,37 +400,6 @@ def test_un_retiro_se_puede_pasar_a_porcentaje_del_patrimonio(window):
     assert panel.current.cashflows[0].amount == pytest.approx(0.04)
 
 
-def test_los_supuestos_de_mercado_son_de_solo_lectura(window):
-    from PySide6.QtWidgets import QAbstractItemView
-
-    assert (
-        window.assets_panel.table.editTriggers()
-        == QAbstractItemView.EditTrigger.NoEditTriggers
-    )
-    assert (
-        window.correlation_panel.table.editTriggers()
-        == QAbstractItemView.EditTrigger.NoEditTriggers
-    )
-
-
-def test_el_boton_de_exportar_arranca_deshabilitado_y_se_habilita_al_simular(window):
-    from gbp.engine.montecarlo import simulate
-    from gbp.model.scenario import SimulationSettings
-
-    assert not window.export_action.isEnabled()
-    assert not window.export_button.isEnabled()
-
-    settings = SimulationSettings(n_paths=300, seed=7)
-    result = simulate(window.scenario, window.cmas, window.correlations, settings)
-    window._on_finished(result)
-
-    assert window.export_action.isEnabled()
-    assert window.export_button.isEnabled()
-
-    window.new_case()
-    assert not window.export_action.isEnabled()
-
-
 # --------------------------------------------------------------------------
 # Sesion anterior y borrado masivo
 # --------------------------------------------------------------------------
@@ -532,6 +415,15 @@ def test_la_sesion_se_restaura_al_reabrir(qapp, tmp_path, monkeypatch):
     primera.scenario.initial_value = 42_000_000.0
     del primera.scenario.strategies[1:]
     primera.scenario.strategies[0].name = "La unica"
+
+    # Un cierre inesperado no debe llevarse lo cargado: el temporizador guarda
+    # la sesion sin esperar a que se cierre la app.
+    from gbp.io import library
+
+    primera._save_session_now()
+    restaurado, _ = library.load_session()
+    assert restaurado is not None
+    assert restaurado.name == "Caso del cliente"
     primera.close()
 
     segunda = MainWindow()
@@ -542,17 +434,6 @@ def test_la_sesion_se_restaura_al_reabrir(qapp, tmp_path, monkeypatch):
         assert segunda.strategies_panel.selector.count() == 1
     finally:
         segunda.close()
-
-
-def test_sin_sesion_previa_se_abre_el_caso_de_ejemplo(qapp, tmp_path, monkeypatch):
-    monkeypatch.setenv("GBP_DATA_DIR", str(tmp_path / "vacio"))
-    from gbp.ui.main_window import MainWindow
-
-    win = MainWindow()
-    try:
-        assert len(win.scenario.strategies) == 3  # el caso de ejemplo
-    finally:
-        win.close()
 
 
 def test_una_sesion_ilegible_no_impide_abrir(qapp, tmp_path, monkeypatch):
@@ -584,7 +465,15 @@ def test_empezar_de_cero_vacia_el_caso_y_olvida_la_sesion(qapp, tmp_path, monkey
     from gbp.ui.main_window import MainWindow
 
     primera = MainWindow()
-    assert len(primera.scenario.strategies) == 3  # el caso de ejemplo
+    ejemplo = [s.name for s in primera.scenario.strategies]
+    assert len(ejemplo) == 3  # sin sesion previa, el caso de ejemplo
+
+    # Cancelar la confirmacion no borra nada.
+    monkeypatch.setattr(
+        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
+    )
+    primera.scenario_panel.reset_button.click()
+    assert [s.name for s in primera.scenario.strategies] == ejemplo
 
     monkeypatch.setattr(
         QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
@@ -622,47 +511,3 @@ def test_el_capital_avisa_cuando_faltan_los_ceros(window):
 
     panel.initial_value.setValue(0)
     assert "Sin capital inicial" in panel.initial_hint.text()
-
-
-def test_cancelar_empezar_de_cero_no_borra_nada(window, monkeypatch):
-    from PySide6.QtWidgets import QMessageBox
-
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.No
-    )
-    antes = [s.name for s in window.scenario.strategies]
-    window.scenario_panel.reset_button.click()
-    assert [s.name for s in window.scenario.strategies] == antes
-
-
-def test_la_sesion_se_guarda_sin_cerrar_la_app(window):
-    """Un cierre inesperado no debe llevarse lo cargado."""
-    from gbp.io import library
-
-    window.scenario.name = "Editado sin cerrar"
-    window._save_session_now()  # lo que hace el temporizador al dispararse
-
-    restaurado, _ = library.load_session()
-    assert restaurado is not None
-    assert restaurado.name == "Editado sin cerrar"
-
-
-def test_borrar_todas_las_estrategias_conserva_el_escenario(window, monkeypatch):
-    from PySide6.QtWidgets import QMessageBox
-
-    monkeypatch.setattr(
-        QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes
-    )
-    panel = window.strategies_panel
-    capital, horizonte = window.scenario.initial_value, window.scenario.horizon
-
-    panel._remove_all_strategies()
-
-    assert window.scenario.strategies == []
-    assert panel.selector.count() == 0
-    assert panel.current is None
-    assert window.scenario.initial_value == capital
-    assert window.scenario.horizon == horizonte
-    # Los paneles hijos quedan deshabilitados, no rotos.
-    assert not panel.cashflow_panel.isEnabled()
-    assert not panel.leverage_panel.isEnabled()

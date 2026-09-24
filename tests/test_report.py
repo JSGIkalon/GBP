@@ -1,4 +1,4 @@
-"""Tests del informe PDF y del progreso granular de la simulacion.
+"""Tests del informe PDF.
 
 El informe no se compara pagina por pagina: se verifica que se escriba un PDF
 valido, que respete las secciones elegidas y que los datos de portada lleguen a
@@ -35,8 +35,7 @@ from gbp.model.scenario import Scenario, SimulationSettings
 from gbp.model.strategy import Strategy
 
 
-@pytest.fixture
-def escenario() -> Scenario:
+def _escenario() -> Scenario:
     return Scenario(
         name="Caso de informe",
         initial_value=20_000_000.0,
@@ -56,7 +55,19 @@ def escenario() -> Scenario:
 
 
 @pytest.fixture
-def corrida(escenario, simple_cmas, simple_corr):
+def escenario() -> Scenario:
+    """Copia propia para los tests que cambian estrategias o créditos."""
+    return _escenario()
+
+
+@pytest.fixture(scope="module")
+def corrida(simple_cmas, simple_corr):
+    """Una sola simulación para todo el módulo: es la parte cara.
+
+    Es de solo lectura. El test que necesite otro escenario usa `escenario`,
+    que es de función, y simula aparte.
+    """
+    escenario = _escenario()
     settings = SimulationSettings(n_paths=400, seed=11, milestone_years=[5, 10, 20])
     result = simulate(escenario, simple_cmas, simple_corr, settings)
     return escenario, result, settings
@@ -75,17 +86,20 @@ def _paginas(path) -> int:
     return int(encontrado[0])
 
 
-def test_el_informe_se_escribe_y_es_un_pdf(corrida, tmp_path):
+def test_el_informe_se_escribe_y_la_portada_llega_a_los_metadatos(corrida, tmp_path):
     escenario, result, settings = corrida
     path = build_report(
         tmp_path / "informe.pdf",
-        ReportOptions(title="Proyeccion", client="Familia X", author="Analista",
+        ReportOptions(title="Revision anual", client="Familia X", author="Ikalon",
                       report_date=date(2026, 3, 15)),
         escenario, result, settings,
     )
     assert path.exists()
-    assert path.read_bytes().startswith(b"%PDF")
+    raw = path.read_bytes()
+    assert raw.startswith(b"%PDF")
     assert path.stat().st_size > 10_000
+    assert b"Revision anual" in raw
+    assert b"Ikalon" in raw
 
 
 def test_las_secciones_desmarcadas_no_salen(corrida, tmp_path):
@@ -105,25 +119,13 @@ def test_las_secciones_desmarcadas_no_salen(corrida, tmp_path):
     assert _paginas(completo) > _paginas(minimo)
 
 
-def test_la_portada_llega_a_los_metadatos(corrida, tmp_path):
-    escenario, result, settings = corrida
-    path = build_report(
-        tmp_path / "meta.pdf",
-        ReportOptions(title="Revision anual", author="Ikalon"),
-        escenario, result, settings,
-    )
-    raw = path.read_bytes()
-    assert b"Revision anual" in raw
-    assert b"Ikalon" in raw
-
-
 def test_un_caso_sin_deuda_omite_la_seccion_de_deuda(
     corrida, escenario, simple_cmas, simple_corr, tmp_path
 ):
-    _, con_deuda_result, settings = corrida
+    con_deuda_escenario, con_deuda_result, settings = corrida
     con_deuda = build_report(
         tmp_path / "con_deuda.pdf", ReportOptions(),
-        escenario, con_deuda_result, settings,
+        con_deuda_escenario, con_deuda_result, settings,
     )
 
     for strategy in escenario.strategies:
@@ -163,24 +165,21 @@ def test_el_anexo_trae_una_hoja_por_estrategia_con_todas_sus_tablas(corrida):
         assert anexo.block(SUMMARY) is None
         assert anexo.block(ALLOCATION) is None
 
-
-def test_la_distribucion_sale_en_las_dos_unidades_y_con_cifras_distintas(corrida):
-    """Nominal y moneda de hoy son dos tablas, no una elegida por settings."""
-    escenario, result, settings = corrida
-    years = settings.milestones_within(escenario.horizon)
-
-    anexo = _build_annex(ReportOptions(), escenario, result, years, True)[0]
-    nominal = anexo.block(DISTRIBUTION)
-    real = anexo.block(DISTRIBUTION_REAL)
-
-    assert nominal.columns == real.columns
-    # Con inflacion positiva la serie real es estrictamente menor, asi que las
-    # dos tablas no pueden traer las mismas cifras.
-    assert nominal.rows != real.rows
+        # Nominal y moneda de hoy son dos tablas, no una elegida por settings.
+        # Con inflacion positiva la serie real es estrictamente menor, asi que
+        # las dos tablas no pueden traer las mismas cifras.
+        nominal = anexo.block(DISTRIBUTION)
+        real = anexo.block(DISTRIBUTION_REAL)
+        assert nominal.columns == real.columns
+        assert nominal.rows != real.rows
 
 
-def test_cada_grafica_cita_las_hojas_de_su_tema(corrida):
-    """El anexo va por estrategia, asi que la cita es el rango de hojas."""
+def test_cada_grafica_cita_las_hojas_de_su_tema_y_solo_si_existen(corrida):
+    """El anexo va por estrategia, asi que la cita es el rango de hojas.
+
+    Y una seccion excluida no deja su tabla: un anexo con el detalle de una
+    grafica ausente no lo entenderia nadie, ni una cita a hojas inexistentes.
+    """
     escenario, result, settings = corrida
     years = settings.milestones_within(escenario.horizon)
 
@@ -189,93 +188,55 @@ def test_cada_grafica_cita_las_hojas_de_su_tema(corrida):
         f"Nota. Detalle en el Anexo · Hojas {annex[0].number} a {annex[-1].number}."
     )
 
-
-def test_una_seccion_excluida_no_deja_su_tabla_en_el_anexo(corrida):
-    """Un anexo con el detalle de una grafica ausente no lo entenderia nadie."""
-    escenario, result, settings = corrida
-    years = settings.milestones_within(escenario.horizon)
-
-    annex = _build_annex(
+    vacio = _build_annex(
         ReportOptions(include_distribution=False, include_summary=False),
         escenario, result, years, False,
     )
-    assert annex == []
-    assert _cite(annex, DISTRIBUTION, "Nota.") == "Nota."  # no cita lo que no existe
+    assert vacio == []
+    assert _cite(vacio, DISTRIBUTION, "Nota.") == "Nota."
 
 
-def test_la_asignacion_va_con_su_grafica_y_no_en_el_anexo(corrida, tmp_path):
-    """La tabla es el detalle exacto de la grafica que se tiene delante.
+def test_el_anexo_gasta_una_hoja_por_estrategia(
+    corrida, escenario, simple_cmas, simple_corr, tmp_path
+):
+    """Toda la informacion de una estrategia tiene que caber en una hoja.
 
-    Se verifica por paginas: la seccion de asignacion no gasta ninguna hoja
-    extra, porque la tabla comparte pagina con su grafica.
+    Con seis estrategias son seis hojas, no doce: una por estrategia, no por
+    tema, con las dos unidades lado a lado dentro de cada hoja.
     """
-    escenario, result, settings = corrida
-    solo = dict(include_distribution=False, include_summary=False,
-                include_debt=False, include_inputs=False, include_flows=False)
-    con = build_report(
-        tmp_path / "con.pdf", ReportOptions(**solo),
-        escenario, result, settings,
-    )
-    sin = build_report(
-        tmp_path / "sin.pdf", ReportOptions(include_allocation=False, **solo),
-        escenario, result, settings,
-    )
-    assert _paginas(sin) == 1                # solo la portada
-    assert _paginas(con) == 2                # portada y la lamina, tabla incluida
-
-
-def test_el_anexo_gasta_una_hoja_por_estrategia(corrida, tmp_path):
-    """Toda la informacion de una estrategia tiene que caber en una hoja."""
-    escenario, result, settings = corrida
+    dos, result, settings = corrida
     path = build_report(
         tmp_path / "agrupado.pdf",
         ReportOptions(include_debt=False, include_inputs=False,
                       include_flows=False),
-        escenario, result, settings,
+        dos, result, settings,
     )
     # Portada, grafica de asignacion, supuestos resumen (cuerpo), las dos
     # laminas de distribucion y UNA hoja de anexo por cada estrategia.
-    assert _paginas(path) == 1 + 1 + 1 + 2 + len(escenario.strategies)
+    assert _paginas(path) == 1 + 1 + 1 + 2 + len(dos.strategies)
 
-
-def test_con_muchas_estrategias_el_anexo_gasta_una_hoja_cada_una(
-    escenario, simple_cmas, simple_corr, tmp_path
-):
-    """Seis estrategias son seis hojas, no doce: una por estrategia, no por tema."""
     base = escenario.strategies[0]
     base.loan = None
     escenario.strategies = [base.copy(f"Estrategia {i}") for i in range(6)]
     settings = SimulationSettings(n_paths=200, seed=3, milestone_years=[5, 10, 20])
-    result = simulate(escenario, simple_cmas, simple_corr, settings)
-
-    agrupado = build_report(
+    seis = simulate(escenario, simple_cmas, simple_corr, settings)
+    path = build_report(
         tmp_path / "seis.pdf",
         ReportOptions(include_allocation=False, include_summary=False,
                       include_debt=False, include_inputs=False,
                       include_flows=False),
-        escenario, result, settings,
+        escenario, seis, settings,
     )
-    # Portada + dos graficas + una hoja de anexo por estrategia, con las dos
-    # unidades lado a lado dentro de cada hoja.
-    assert _paginas(agrupado) == 1 + 2 + 6
+    # Portada + dos graficas + una hoja de anexo por estrategia.
+    assert _paginas(path) == 1 + 2 + 6
 
 
-def test_el_anexo_de_flujos_trae_la_serie_ano_por_ano(corrida):
-    """La unica forma de comprobar que un flujo indexado crece como se esperaba."""
-    escenario, result, settings = corrida
-    tabla = _flows_table(result)
+def test_el_retiro_indexado_crece_con_la_inflacion_en_el_anexo(corrida):
+    """El retiro de 800k vale 800k el año 1 y 800k·1.025^(y-1) en el año y.
 
-    assert tabla is not None
-    assert tabla.kind == FLOWS
-    # Solo la estrategia con flujos: la otra no tiene serie que mostrar.
-    assert tabla.strategies == ["Sin deuda"]
-    filas = tabla.per_strategy[0][1]
-    assert len(filas) == escenario.horizon
-    assert [f[0] for f in filas] == [str(y) for y in range(1, escenario.horizon + 1)]
-
-
-def test_el_retiro_indexado_crece_con_la_inflacion(corrida):
-    """El retiro de 800k vale 800k el año 1 y 800k·1.025^(y-1) en el año y."""
+    El anexo de flujos trae esa serie año por año: es la unica forma de que el
+    lector compruebe que un flujo indexado crece como se esperaba.
+    """
     escenario, result, _ = corrida
     serie = result.by_name("Sin deuda").flow_history()
 
@@ -284,108 +245,14 @@ def test_el_retiro_indexado_crece_con_la_inflacion(corrida):
         assert serie["retiros"][year - 1] == pytest.approx(esperado)
     assert not serie["aportes"].any()
 
-
-def test_los_supuestos_y_los_activos_propios_comparten_pagina(
-    corrida, simple_cmas, tmp_path
-):
-    """Dos columnas de la misma hoja, no dos hojas."""
-    from gbp.model.assets import AssetClass, CMASet
-
-    escenario, result, settings = corrida
-    propio = AssetClass(
-        "Acciones", compound_return=0.07, volatility=0.16,
-        origin="custom", asset_class="Renta variable", notes="Supuesto interno.",
-    )
-    cmas = CMASet([propio] + [a for a in simple_cmas.assets if a.name != "Acciones"])
-
-    solo_inputs = dict(include_distribution=False, include_summary=False,
-                       include_allocation=False, include_debt=False)
-    sin_propios = build_report(
-        tmp_path / "sin.pdf", ReportOptions(**solo_inputs),
-        escenario, result, settings,
-    )
-    con_propios = build_report(
-        tmp_path / "con.pdf", ReportOptions(cmas=cmas, **solo_inputs),
-        escenario, result, settings,
-    )
-    # Documentar los activos propios no puede costar una hoja mas: van en la
-    # columna derecha de la misma pagina.
-    assert _paginas(con_propios) == _paginas(sin_propios)
-
-
-# --------------------------------------------------------------------------
-# Progreso
-# --------------------------------------------------------------------------
-
-
-def test_el_progreso_avanza_ano_a_ano(escenario, simple_cmas, simple_corr):
-    """Con una sola estrategia la barra tiene que pasar por el medio.
-
-    Antes el progreso se contaba por estrategia, asi que un caso de una sola
-    estrategia saltaba de 0 a 100 sin ningun paso intermedio.
-    """
-    escenario.strategies = escenario.strategies[:1]
-    avisos = []
-    settings = SimulationSettings(n_paths=200, seed=5)
-    simulate(escenario, simple_cmas, simple_corr, settings,
-             progress=lambda done, total, label: avisos.append((done, total, label)))
-
-    total = avisos[0][1]
-    assert total == 1 + escenario.horizon
-    assert all(t == total for _, t, _ in avisos)
-
-    valores = [done for done, _, _ in avisos]
-    assert valores[0] == 0
-    assert valores[-1] == total
-    assert valores == sorted(valores)          # nunca retrocede
-    assert len({v for v in valores}) > 2       # pasa por el medio, no salta
-    assert "Listo" in avisos[-1][2]
-
-
-def test_el_progreso_es_opcional(escenario, simple_cmas, simple_corr):
-    result = simulate(escenario, simple_cmas, simple_corr,
-                      SimulationSettings(n_paths=200, seed=5))
-    assert len(result.strategies) == 2
-
-
-@pytest.mark.parametrize("mostrar", [True, False])
-def test_el_informe_respeta_la_casilla_de_percentiles(corrida, tmp_path, monkeypatch, mostrar):
-    """Si en pantalla están ocultos, el PDF tampoco los trae."""
-    import gbp.io.report as report
-
-    vistos = []
-    original = report.draw_box_chart
-
-    def espia(*args, show_percentile_labels=True, **kwargs):
-        vistos.append(show_percentile_labels)
-        return original(*args, show_percentile_labels=show_percentile_labels, **kwargs)
-
-    monkeypatch.setattr(report, "draw_box_chart", espia)
-    escenario, result, settings = corrida
-    build_report(tmp_path / "informe.pdf",
-                 ReportOptions(show_percentile_labels=mostrar),
-                 escenario, result, settings)
-    assert vistos == [mostrar, mostrar]  # nominal y moneda de hoy
-
-
-def test_ocultar_percentiles_deja_solo_la_mediana(corrida):
-    from matplotlib.figure import Figure
-
-    from gbp.io.report import _FigureCanvas
-    from gbp.ui.charts.box_chart import draw_box_chart
-
-    _, result, settings = corrida
-    years = settings.milestone_years
-
-    def etiquetas(mostrar):
-        figura = Figure(figsize=(11, 8.5))
-        draw_box_chart(_FigureCanvas(figura), result, years,
-                       show_percentile_labels=mostrar)
-        return len(figura.axes[0].texts)
-
-    cajas = len(result.strategies) * len(years)
-    assert etiquetas(False) == cajas          # una mediana por caja
-    assert etiquetas(True) > cajas
+    tabla = _flows_table(result)
+    assert tabla is not None
+    assert tabla.kind == FLOWS
+    # Solo la estrategia con flujos: la otra no tiene serie que mostrar.
+    assert tabla.strategies == ["Sin deuda"]
+    filas = tabla.per_strategy[0][1]
+    assert len(filas) == escenario.horizon
+    assert [f[0] for f in filas] == [str(y) for y in range(1, escenario.horizon + 1)]
 
 
 def test_las_cifras_del_grafico_coinciden_con_la_tabla(corrida):

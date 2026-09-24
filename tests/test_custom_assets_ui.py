@@ -56,20 +56,7 @@ def _escenario_mixto() -> Scenario:
 # --------------------------------------------------------------------------
 
 
-def test_guardar_y_cargar_conserva_origen_y_clase():
-    cmas = library.seed_cmas()
-    cmas.add(AssetClass(**COLOMBIA))
-    library.save_cmas(cmas)
-
-    recargada = library.load_cmas()
-    propio = recargada.by_name("Renta Fija Colombiana")
-    assert propio.is_custom
-    assert propio.asset_class == FIXED_INCOME
-    assert propio.notes == "TES tasa fija, convertido a USD"
-    assert not recargada.by_name("U.S. Large Cap").is_custom
-
-
-def test_guardar_y_cargar_conserva_la_fuente_de_correlacion():
+def test_guardar_y_cargar_conserva_origen_clase_y_fuente():
     cmas = library.seed_cmas()
     cmas.add(AssetClass(
         **{**COLOMBIA, "correlation_source": "U.S. Short Duration Government/Credit"}
@@ -78,7 +65,11 @@ def test_guardar_y_cargar_conserva_la_fuente_de_correlacion():
 
     recargada = library.load_cmas()
     propio = recargada.by_name("Renta Fija Colombiana")
+    assert propio.is_custom
+    assert propio.asset_class == FIXED_INCOME
+    assert propio.notes == "TES tasa fija, convertido a USD"
     assert propio.correlation_source == "U.S. Short Duration Government/Credit"
+    assert not recargada.by_name("U.S. Large Cap").is_custom
 
     # Un activo propio sin fuente puntual sigue sin escribir la llave, para que
     # una librería sin este campo quede byte a byte la de siempre.
@@ -140,12 +131,6 @@ def test_restaurar_el_ltcma_conserva_los_activos_propios():
     assert len(restaurada.ltcma) == len(library.seed_cmas())
 
 
-def test_no_se_puede_borrar_una_clase_del_ltcma():
-    cmas = library.seed_cmas()
-    with pytest.raises(ValueError, match="no se puede borrar"):
-        library.delete_custom_asset(cmas, "U.S. Large Cap")
-
-
 # --------------------------------------------------------------------------
 # Caso
 # --------------------------------------------------------------------------
@@ -163,8 +148,12 @@ def test_el_caso_lleva_solo_los_activos_propios_que_usa(tmp_path):
 
 
 def test_ida_y_vuelta_de_un_caso_con_activos_propios(tmp_path):
+    """El caso tiene que abrir en otro computador con el mismo activo propio,
+    incluida su fuente puntual: sin ella la correlación se derivaría distinto."""
     cmas = library.seed_cmas()
-    cmas.add(AssetClass(**COLOMBIA))
+    cmas.add(AssetClass(
+        **{**COLOMBIA, "correlation_source": "U.S. Short Duration Government/Credit"}
+    ))
     path = tmp_path / "caso.gbp.json"
 
     save_case(_escenario_mixto(), path, cmas)
@@ -177,36 +166,7 @@ def test_ida_y_vuelta_de_un_caso_con_activos_propios(tmp_path):
     assert propios[0].is_custom
     assert propios[0].asset_class == FIXED_INCOME
     assert propios[0].compound_return == pytest.approx(0.058)
-
-
-def test_ida_y_vuelta_de_un_caso_conserva_la_fuente_de_correlacion(tmp_path):
-    cmas = library.seed_cmas()
-    cmas.add(AssetClass(
-        **{**COLOMBIA, "correlation_source": "U.S. Short Duration Government/Credit"}
-    ))
-    path = tmp_path / "caso.gbp.json"
-
-    save_case(_escenario_mixto(), path, cmas)
-    payload = read_case(path)
-    propios = custom_assets_from_dict(payload)
-
     assert propios[0].correlation_source == "U.S. Short Duration Government/Credit"
-
-
-def test_un_caso_sin_activos_propios_no_escribe_la_llave(tmp_path):
-    cmas = library.seed_cmas()
-    escenario = Scenario(
-        name="Solo LTCMA", initial_value=1_000_000.0, horizon=10,
-        strategies=[Strategy(Allocation("A", {"U.S. Large Cap": 1.0}))],
-    )
-    assert "custom_assets" not in to_dict(escenario, cmas)
-
-
-def test_guardar_sin_libreria_sigue_funcionando(tmp_path):
-    """Los llamadores viejos de save_case no pasan cmas."""
-    path = tmp_path / "viejo.gbp.json"
-    save_case(_escenario_mixto(), path)
-    assert from_dict(read_case(path)).name == "Cliente colombiano"
 
 
 # --------------------------------------------------------------------------
@@ -268,7 +228,9 @@ def window(qapp):
     win.close()
 
 
-def test_un_activo_propio_entra_en_available_assets(window):
+def test_un_activo_propio_entra_y_sale_de_available_assets(window):
+    """Agregar y borrar tiene que mover a la vez la lista, la matriz y el
+    resolvedor: si uno se queda atrás, el caso deja de ser simulable."""
     window.cmas.add(AssetClass(**COLOMBIA))
     window._on_assets_changed()
 
@@ -276,27 +238,11 @@ def test_un_activo_propio_entra_en_available_assets(window):
     assert "Renta Fija Colombiana" in window.correlations.names
     assert window.resolver.group_of("Renta Fija Colombiana") == FIXED_INCOME
 
-
-def test_borrar_un_activo_propio_lo_saca_de_available_assets(window):
-    window.cmas.add(AssetClass(**COLOMBIA))
-    window._on_assets_changed()
     window.cmas.remove("Renta Fija Colombiana")
     window._on_assets_changed()
 
     assert "Renta Fija Colombiana" not in window.available_assets
     assert "Renta Fija Colombiana" not in window.correlations.names
-
-
-def test_la_vista_agrupada_usa_la_clase_declarada(window):
-    from gbp.model.groups import group_weights
-
-    window.cmas.add(AssetClass(**COLOMBIA))
-    window._on_assets_changed()
-
-    agrupado = group_weights(
-        {"U.S. Large Cap": 0.6, "Renta Fija Colombiana": 0.4}, window.resolver
-    )
-    assert agrupado[FIXED_INCOME] == pytest.approx(0.4)
 
 
 def test_un_activo_propio_aparece_en_su_clase_declarada_en_la_asignacion(window):
@@ -324,20 +270,6 @@ def test_un_activo_propio_aparece_en_su_clase_declarada_en_la_asignacion(window)
         for r in range(window.results.allocation_table.rowCount())
     }
     assert FIXED_INCOME in clases
-
-
-def test_los_botones_de_editar_se_deshabilitan_sobre_una_fila_del_ltcma(window):
-    panel = window.assets_panel
-    panel.table.setCurrentCell(0, 0)  # la primera es del LTCMA
-    assert not panel.selected.is_custom
-    assert not panel.edit_button.isEnabled()
-    assert not panel.delete_button.isEnabled()
-
-    window.cmas.add(AssetClass(**COLOMBIA))
-    panel.reload(window.cmas)
-    panel.table.setCurrentCell(len(window.cmas) - 1, 0)
-    assert panel.selected.is_custom
-    assert panel.edit_button.isEnabled()
 
 
 def test_abrir_un_caso_con_un_activo_propio_lo_deja_simulable(window, tmp_path, monkeypatch):

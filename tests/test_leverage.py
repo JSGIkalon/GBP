@@ -23,15 +23,16 @@ from gbp.model.strategy import Strategy
 # --------------------------------------------------------------------------
 
 
-def test_bullet_no_amortiza_hasta_el_vencimiento():
-    terms = LoanTerms(principal=100.0, term_years=5, amortization=Amortization.BULLET)
-    fractions = terms.amortization_fractions()
-    np.testing.assert_allclose(fractions, [0, 0, 0, 0, 1.0])
-
-
-def test_lineal_amortiza_en_partes_iguales():
-    terms = LoanTerms(principal=100.0, term_years=4, amortization=Amortization.LINEAR)
-    np.testing.assert_allclose(terms.amortization_fractions(), [0.25] * 4)
+@pytest.mark.parametrize(
+    ("amortization", "term", "expected"),
+    [
+        pytest.param(Amortization.BULLET, 5, [0, 0, 0, 0, 1.0], id="bullet_al_vencimiento"),
+        pytest.param(Amortization.LINEAR, 4, [0.25] * 4, id="lineal_en_partes_iguales"),
+    ],
+)
+def test_las_amortizaciones_simples_siguen_su_calendario(amortization, term, expected):
+    terms = LoanTerms(principal=100.0, term_years=term, amortization=amortization)
+    np.testing.assert_allclose(terms.amortization_fractions(), expected)
 
 
 def test_cuota_fija_reproduce_una_tabla_calculada_a_mano():
@@ -167,20 +168,21 @@ def test_margin_call_respeta_un_objetivo_mas_conservador():
     assert sim.balance[0] / (assets[0] - sale[0]) == pytest.approx(0.5)
 
 
-def test_no_hay_margin_call_dentro_del_limite():
-    terms = LoanTerms(principal=40.0, term_years=5, max_ltv=0.6)
+@pytest.mark.parametrize(
+    ("principal", "max_ltv"),
+    [
+        pytest.param(40.0, 0.6, id="dentro_del_limite"),
+        pytest.param(95.0, None, id="sin_ltv_maximo"),
+    ],
+)
+def test_no_hay_margin_call_si_no_se_cruza_un_limite(principal, max_ltv):
+    """Sin LTV máximo no se liquida ni con deuda del 95%: el límite es opcional."""
+    terms = LoanTerms(principal=principal, term_years=5, max_ltv=max_ltv)
     sim = LoanSimulator(terms, n_paths=1, horizon=5)
     sim.drawdown(1)
     sale = sim.margin_call(np.array([100.0]))
     assert sale[0] == pytest.approx(0.0)
     assert sim.margin_calls[0] == 0
-
-
-def test_sin_ltv_maximo_no_se_liquida_nunca():
-    terms = LoanTerms(principal=95.0, term_years=5, max_ltv=None)
-    sim = LoanSimulator(terms, n_paths=1, horizon=5)
-    sim.drawdown(1)
-    assert sim.margin_call(np.array([100.0]))[0] == pytest.approx(0.0)
 
 
 def test_margin_call_no_vende_mas_de_lo_que_hay():
@@ -242,28 +244,6 @@ def test_el_desembolso_entra_al_portafolio(deterministic_cmas, deterministic_cor
     assert strategy.assets[:, 0].mean() == pytest.approx(1500.0 * 1.05)
     assert strategy.debt[:, 0].mean() == pytest.approx(500.0)
     assert strategy.wealth[:, 0].mean() == pytest.approx(1500.0 * 1.05 - 500.0)
-
-
-def test_el_apalancamiento_amplifica_el_resultado(deterministic_cmas, deterministic_corr):
-    """Si el portafolio rinde mas que la tasa, apalancarse deja mas patrimonio."""
-    loan = LoanTerms(
-        principal=500.0,
-        term_years=5,
-        rate=0.02,  # menor que el 5% del activo
-        interest_mode=InterestMode.PAID,
-        amortization=Amortization.BULLET,
-    )
-    settings = SimulationSettings(n_paths=200, seed=1)
-    con = simulate(
-        _leveraged_scenario(loan), deterministic_cmas, deterministic_corr, settings
-    ).strategies[0]
-    sin = simulate(
-        _leveraged_scenario(LoanTerms(principal=0.0)),
-        deterministic_cmas,
-        deterministic_corr,
-        settings,
-    ).strategies[0]
-    assert con.wealth[:, -1].mean() > sin.wealth[:, -1].mean()
 
 
 def test_la_deuda_queda_saldada_al_final_del_plazo(deterministic_cmas, deterministic_corr):

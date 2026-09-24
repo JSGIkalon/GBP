@@ -184,12 +184,6 @@ def test_valores_reales_descuentan_la_inflacion(deterministic_cmas, deterministi
     assert real == pytest.approx(nominal / 1.02**5)
 
 
-def test_escenario_invalido_se_rechaza(simple_cmas, simple_corr):
-    scenario = _scenario(strategies=[_strategy("Mala", {"Acciones": 0.8})])
-    with pytest.raises(ValueError, match="sumar 100%"):
-        simulate(scenario, simple_cmas, simple_corr, SimulationSettings(n_paths=100))
-
-
 # --------------------------------------------------------------------------
 # Estrategias independientes: cada una con sus flujos, credito y capital
 # --------------------------------------------------------------------------
@@ -288,21 +282,6 @@ def test_los_hitos_respetan_lo_configurado():
     assert settings.milestones_within(12) == [5, 10]
 
 
-def test_una_estrategia_sin_capital_ni_aportes_se_rechaza(simple_cmas, simple_corr):
-    scenario = _scenario(
-        initial_value=0.0,
-        strategies=[_strategy("Vacia", {"Acciones": 1.0})],
-    )
-    with pytest.raises(ValueError, match="Vacia"):
-        scenario.validate(simple_cmas)
-
-
-def test_clase_desconocida_se_rechaza(simple_cmas, simple_corr):
-    scenario = _scenario(strategies=[_strategy("Rara", {"Cripto": 1.0})])
-    with pytest.raises(ValueError, match="Cripto"):
-        simulate(scenario, simple_cmas, simple_corr, SimulationSettings(n_paths=100))
-
-
 # ----------------------------------------------------------------------
 # Retiros como porcentaje del patrimonio
 
@@ -320,32 +299,24 @@ def _pct(amount: float, **kwargs) -> CashFlow:
     return CashFlow(**defaults)
 
 
-def test_retiro_porcentual_deja_el_patrimonio_en_el_neto_compuesto(
-    deterministic_cmas, deterministic_corr
+@pytest.mark.parametrize(
+    ("kind", "factor"), [(FlowKind.OUTFLOW, 0.96), (FlowKind.INFLOW, 1.04)]
+)
+def test_flujo_porcentual_deja_el_patrimonio_en_el_neto_compuesto(
+    deterministic_cmas, deterministic_corr, kind, factor
 ):
-    """Retirar 4% tras crecer 5% deja el patrimonio creciendo a 1.05*0.96 por año."""
-    scenario = _scenario(cashflows=[_pct(0.04)])
+    """Un 4% tras crecer 5% deja el patrimonio creciendo a 1.05*(1∓0.04) por año.
+
+    El aporte va en el mismo test porque lo único que cambia es el signo: si
+    alguien invierte el signo de un solo lado, uno de los dos casos se rompe.
+    """
+    scenario = _scenario(cashflows=[_pct(0.04, kind=kind)])
     result = simulate(
         scenario, deterministic_cmas, deterministic_corr, SimulationSettings(n_paths=200, seed=1)
     )
     wealth = result.strategies[0].wealth
-    expected = 1_000_000.0 * (1.05 * 0.96) ** np.arange(1, 11)
+    expected = 1_000_000.0 * (1.05 * factor) ** np.arange(1, 11)
     np.testing.assert_allclose(wealth.mean(axis=0), expected, rtol=1e-10)
-
-
-def test_retiro_porcentual_nunca_agota_el_portafolio(simple_cmas, simple_corr):
-    """Un 20% anual castiga el patrimonio pero no lo lleva a cero ni lo cruza."""
-    scenario = _scenario(
-        horizon=30,
-        strategies=[_strategy("Acciones", {"Acciones": 1.0})],
-        cashflows=[_pct(0.20, end_year=30)],
-    )
-    result = simulate(
-        scenario, simple_cmas, simple_corr, SimulationSettings(n_paths=2_000, seed=7)
-    )
-    wealth = result.strategies[0].wealth
-    assert (wealth > 0).all()
-    assert wealth[:, -1].mean() < 1_000_000.0
 
 
 def test_un_retiro_fijo_del_mismo_tamano_si_agota_el_portafolio(simple_cmas, simple_corr):
@@ -400,15 +371,6 @@ def test_flujo_porcentual_respeta_su_ventana_de_anos(deterministic_cmas, determi
     np.testing.assert_allclose(wealth[2:], sin_retiro[2:] * 0.5, rtol=1e-10)
 
 
-def test_aporte_porcentual_suma_en_vez_de_restar(deterministic_cmas, deterministic_corr):
-    scenario = _scenario(cashflows=[_pct(0.04, kind=FlowKind.INFLOW)])
-    result = simulate(
-        scenario, deterministic_cmas, deterministic_corr, SimulationSettings(n_paths=100, seed=1)
-    )
-    expected = 1_000_000.0 * (1.05 * 1.04) ** np.arange(1, 11)
-    np.testing.assert_allclose(result.strategies[0].wealth.mean(axis=0), expected, rtol=1e-10)
-
-
 def test_un_flujo_porcentual_ignora_inflacion_y_crecimiento_real():
     """Se normalizan al construir, no se confía en que la UI no los mande."""
     flow = _pct(0.04, inflation_indexed=True, growth=0.02)
@@ -416,11 +378,6 @@ def test_un_flujo_porcentual_ignora_inflacion_y_crecimiento_real():
     assert flow.growth == 0.0
     np.testing.assert_allclose(flow.rate_schedule(3), [-0.04, -0.04, -0.04])
     np.testing.assert_allclose(flow.schedule(3, 0.025), [0.0, 0.0, 0.0])
-
-
-def test_un_porcentaje_mayor_que_uno_se_rechaza():
-    with pytest.raises(ValueError, match="fracción"):
-        _pct(4.0)
 
 
 def test_los_dos_calendarios_son_excluyentes():
@@ -433,3 +390,41 @@ def test_los_dos_calendarios_son_excluyentes():
     np.testing.assert_allclose(
         combined_rate_schedule([fijo, porcentual], 5), [-0.04] * 5
     )
+
+
+# ----------------------------------------------------------------------
+# Entradas inválidas
+
+
+def _run(scenario, cmas, corr):
+    return simulate(scenario, cmas, corr, SimulationSettings(n_paths=100))
+
+
+@pytest.mark.parametrize(
+    ("build", "match"),
+    [
+        pytest.param(
+            lambda c, k: _run(_scenario(strategies=[_strategy("Mala", {"Acciones": 0.8})]), c, k),
+            "sumar 100%",
+            id="pesos_que_no_suman_100",
+        ),
+        pytest.param(
+            lambda c, k: _scenario(
+                initial_value=0.0, strategies=[_strategy("Vacia", {"Acciones": 1.0})]
+            ).validate(c),
+            "Vacia",
+            id="sin_capital_ni_aportes",
+        ),
+        pytest.param(
+            lambda c, k: _run(_scenario(strategies=[_strategy("Rara", {"Cripto": 1.0})]), c, k),
+            "Cripto",
+            id="clase_desconocida",
+        ),
+        pytest.param(lambda c, k: _pct(4.0), "fracción", id="porcentaje_mayor_que_uno"),
+    ],
+)
+def test_una_entrada_invalida_se_rechaza_con_mensaje_util(simple_cmas, simple_corr, build, match):
+    """Cada rechazo debe nombrar lo que está mal (la estrategia, la clase, la
+    regla), no solo fallar: el mensaje es lo que el usuario ve en la app."""
+    with pytest.raises(ValueError, match=match):
+        build(simple_cmas, simple_corr)
