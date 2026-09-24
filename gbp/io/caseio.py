@@ -21,6 +21,11 @@ rechazarse:
   porque una versión anterior de la app ignoraría el campo en silencio y
   simularía un retiro de 4 unidades donde el caso dice 4%; mejor que se niegue a
   abrirlo y pida actualizar.
+* **Esquema 5** — el caso puede llevar **metas** y una **tasa USD/COP** para la
+  vista en pesos. Las dos son opcionales y ninguna entra a la simulación: un
+  caso de esquema 4 se abre sin metas ni tasa y simula idéntico. El número sube
+  por la misma razón que en el 4: una versión anterior abriría el caso y, al
+  guardarlo, borraría las metas sin avisar.
 
 Por qué los activos propios sí van en el caso
 ---------------------------------------------
@@ -40,11 +45,12 @@ from pathlib import Path
 
 from ..model.allocation import Allocation
 from ..model.cashflows import CashFlow, FlowBasis, FlowKind
+from ..model.goals import Goal, GoalPriority
 from ..model.leverage import Amortization, InterestMode, LoanTerms, RateMode
 from ..model.scenario import Scenario
 from ..model.strategy import Strategy
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 EXTENSION = ".gbp.json"
 
 
@@ -171,12 +177,35 @@ def custom_assets_from_dict(payload: dict) -> list:
     ]
 
 
+def _goal_to_dict(goal: Goal) -> dict:
+    return {
+        "name": goal.name,
+        "amount": goal.amount,
+        "year": goal.year,
+        "real": goal.real,
+        "priority": goal.priority.value,
+    }
+
+
+def _goal_from_dict(payload: dict) -> Goal:
+    year = payload.get("year")
+    return Goal(
+        name=payload.get("name", "Meta"),
+        amount=float(payload.get("amount", 0.0)),
+        year=int(year) if year is not None else None,
+        real=bool(payload.get("real", True)),
+        priority=GoalPriority(payload.get("priority", GoalPriority.IMPORTANT.value)),
+    )
+
+
 def _scenario_to_dict(scenario: Scenario) -> dict:
     return {
         "name": scenario.name,
         "initial_value": scenario.initial_value,
         "horizon": scenario.horizon,
         "inflation": scenario.inflation,
+        "fx_spot": scenario.fx_spot,
+        "goals": [_goal_to_dict(g) for g in scenario.goals],
         "strategies": [
             {
                 "name": s.name,
@@ -222,12 +251,15 @@ def from_dict(payload: dict) -> Scenario:
                 for s in data.get("strategies", [])
             ]
 
+        fx_spot = data.get("fx_spot")
         return Scenario(
             name=data.get("name", "Caso sin título"),
             initial_value=float(data.get("initial_value", 0.0)),
             horizon=int(data.get("horizon", 30)),
             inflation=float(data.get("inflation", 0.025)),
             strategies=strategies,
+            goals=[_goal_from_dict(g) for g in data.get("goals", [])],
+            fx_spot=float(fx_spot) if fx_spot else None,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise CaseFormatError(f"El caso está dañado o incompleto: {exc}") from exc

@@ -250,6 +250,50 @@ class SimulationResult:
     n_paths: int
     seed: int | None = None
     scenario_name: str = ""
+    # Vacío en la corrida original, que está en la moneda de los supuestos
+    # (USD). `in_currency` lo marca, y así cada gráfico y tabla puede decir en
+    # qué moneda está sin que nadie se lo pase aparte.
+    currency: str = ""
+    fx_rate: float = 1.0
+
+    def in_currency(self, rate: float, currency: str = "COP") -> "SimulationResult":
+        """La misma corrida con todos los montos multiplicados por una tasa fija.
+
+        Es una **vista**: no se vuelve a simular nada. Con una tasa fija, toda
+        cifra en dinero se multiplica por el mismo número, así que
+        probabilidades, porcentajes y Sharpe no cambian —no dependen de la
+        escala— y los percentiles convertidos son los percentiles de lo
+        convertido. Se devuelven copias nuevas, con cachés vacías, para que
+        nada de la vista en USD se cuele en la de COP ni al revés.
+        """
+        def convert(s: StrategyResult) -> StrategyResult:
+            wealth = s.wealth * rate
+            # Sin crédito el motor comparte un solo arreglo para activos y
+            # patrimonio; la vista lo sigue compartiendo en vez de duplicarlo.
+            assets = wealth if np.shares_memory(s.wealth, s.assets) else s.assets * rate
+            return StrategyResult(
+                name=s.name,
+                wealth=wealth,
+                assets=assets,
+                debt=s.debt * rate,
+                summary=s.summary,
+                margin_calls=s.margin_calls,
+                forced_sales=s.forced_sales * rate,
+                inflation_factors=s.inflation_factors,
+                contributions=s.contributions * rate,
+                withdrawals=s.withdrawals * rate,
+                initial_value=s.initial_value * rate,
+            )
+
+        return SimulationResult(
+            strategies=[convert(s) for s in self.strategies],
+            horizon=self.horizon,
+            n_paths=self.n_paths,
+            seed=self.seed,
+            scenario_name=self.scenario_name,
+            currency=currency,
+            fx_rate=rate,
+        )
 
     def __iter__(self):
         return iter(self.strategies)

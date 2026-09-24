@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .assets import CMASet
+from .goals import Goal
 from .strategy import Strategy
 
 
@@ -62,12 +63,24 @@ class Scenario:
     horizon: int = 30
     inflation: float = 0.025
     strategies: list[Strategy] = field(default_factory=list)
+    # Opcionales: un caso sin metas y sin tasa se comporta exactamente como
+    # antes de que existieran. Ninguno de los dos entra a la simulación.
+    goals: list[Goal] = field(default_factory=list)
+    # Pesos colombianos por dólar, para **ver** los resultados en COP. Es una
+    # tasa fija: convierte cifras, no modela la moneda.
+    fx_spot: float | None = None
 
     def __post_init__(self) -> None:
         if self.horizon < 1:
             raise ValueError("El horizonte debe ser de al menos un año.")
         if self.initial_value < 0:
             raise ValueError("El capital inicial no puede ser negativo.")
+        if self.fx_spot is not None and self.fx_spot <= 0:
+            self.fx_spot = None
+
+    @property
+    def has_fx(self) -> bool:
+        return self.fx_spot is not None and self.fx_spot > 0
 
     def validate(self, cmas: CMASet) -> None:
         """Verifica que el caso se pueda simular con la librería de CMAs dada."""

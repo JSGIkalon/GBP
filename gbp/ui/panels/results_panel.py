@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...model.goals import goal_probability
 from ...model.results import SimulationResult
 from ...model.scenario import Scenario, SimulationSettings
 from ..charts.allocation_chart import allocation_table_rows, draw_allocation_chart
@@ -68,7 +69,13 @@ class ResultsPanel(QTabWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        # `base_result` es la corrida tal como salió, en USD. `result` es lo que
+        # se está mostrando: la misma corrida o su vista en COP. Todas las
+        # tablas y gráficos leen `result`, así que convertir es cambiar uno solo.
+        self.base_result: SimulationResult | None = None
         self.result: SimulationResult | None = None
+        self.fx_rate: float | None = None
+        self.goals: list = []
         self.settings = SimulationSettings()
         self.years: list[int] = []
         # Los percentiles p10/p25/p75/p90 se pueden ocultar del gráfico: la
@@ -171,6 +178,20 @@ class ResultsPanel(QTabWidget):
         de_layout.addWidget(self.debt_table, 1)
         self.addTab(debt, "Deuda")
 
+        # --- Metas: la pestaña solo existe si el caso tiene metas ----------
+        self.goals_page = QWidget()
+        g_layout = QVBoxLayout(self.goals_page)
+        self.goals_table = _table(["Meta"])
+        g_layout.addWidget(self.goals_table, 1)
+        goals_note = QLabel(
+            "Probabilidad de que el patrimonio neto de ese año sea al menos el monto "
+            "de la meta, sin que el portafolio se haya agotado antes. Las metas no "
+            "cambian la simulación: se miden sobre los mismos caminos."
+        )
+        goals_note.setWordWrap(True)
+        goals_note.setStyleSheet(f"color: {INK_SOFT};")
+        g_layout.addWidget(goals_note)
+
         self.clear()
 
     # ------------------------------------------------------------------
@@ -212,8 +233,10 @@ class ResultsPanel(QTabWidget):
             )
 
     def clear(self):
+        self.base_result = None
         self.result = None
         self.years = []
+        self.goals_table.setRowCount(0)
         for canvas in (self.box_canvas, self.real_canvas, self.debt_canvas):
             canvas.show_message(EMPTY)
         for table in (self.range_table, self.real_table, self.summary_table, self.debt_table,
@@ -235,9 +258,40 @@ class ResultsPanel(QTabWidget):
         )
 
     def show_result(self, result: SimulationResult, settings: SimulationSettings, horizon: int):
-        self.result = result
+        self.base_result = result
         self.settings = settings
         self.years = settings.milestones_within(horizon)
+        self._render()
+
+    def set_view(self, fx_rate: float | None, goals: list):
+        """Moneda de lectura y metas del caso, que no requieren volver a simular.
+
+        Las dos son del caso vivo y no de la corrida: cambiar la tasa o agregar
+        una meta se ve de inmediato sobre los mismos caminos.
+        """
+        changed_rate = fx_rate != self.fx_rate
+        self.fx_rate = fx_rate
+        self.goals = goals
+        self._sync_goals_tab()
+        if self.base_result is None:
+            return
+        if changed_rate:
+            self._render()
+        else:
+            self._show_goals()
+
+    def _sync_goals_tab(self):
+        index = self.indexOf(self.goals_page)
+        if self.goals and index < 0:
+            self.addTab(self.goals_page, "Metas")
+        elif not self.goals and index >= 0:
+            self.removeTab(index)
+
+    def _render(self):
+        result = self.base_result
+        if self.fx_rate:
+            result = result.in_currency(self.fx_rate)
+        self.result = result
 
         self._draw_distributions()
         for table, real in ((self.range_table, False), (self.real_table, True)):
@@ -246,6 +300,37 @@ class ResultsPanel(QTabWidget):
         self._show_summary(result)
         self._show_debt(result)
         self._show_flows_selector(result)
+        self._show_goals()
+
+    def _show_goals(self):
+        if not self.goals or self.result is None:
+            self.goals_table.setRowCount(0)
+            return
+        result = self.result
+        columns = ["Meta", "Año", "Monto", "Unidad", "Prioridad", *result.names]
+        self.goals_table.setColumnCount(len(columns))
+        self.goals_table.setHorizontalHeaderLabels(columns)
+        header = self.goals_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for i in range(1, len(columns)):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        rate = result.fx_rate
+        rows = []
+        for goal in self.goals:
+            row = {
+                "Meta": goal.name,
+                "Año": "final" if goal.year is None else goal.year,
+                # La meta se define en la moneda del caso; en la vista COP se
+                # muestra convertida con la misma tasa que el resto.
+                "Monto": format_money(goal.amount * rate),
+                "Unidad": "moneda de hoy" if goal.real else "nominal",
+                "Prioridad": goal.priority.value,
+            }
+            for strategy in self.base_result.strategies:
+                p = goal_probability(strategy, goal)
+                row[strategy.name] = "fuera del horizonte" if np.isnan(p) else f"{p:.1%}"
+            rows.append(row)
+        _fill(self.goals_table, rows, columns)
 
     # ------------------------------------------------------------------
     def _show_flows_selector(self, result: SimulationResult):

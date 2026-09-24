@@ -113,7 +113,10 @@ def draw_box_chart(
 
     ax.set_xticks(positions_base)
     ax.set_xticklabels([f"Año {y}" for y in years])
-    ax.set_ylabel("Patrimonio neto, en moneda de hoy" if real else "Patrimonio neto")
+    moneda = f" ({result.currency})" if result.currency else ""
+    ax.set_ylabel(
+        f"Patrimonio neto{moneda}, en moneda de hoy" if real else f"Patrimonio neto{moneda}"
+    )
     ax.axhline(0, color=BASELINE, linewidth=1, zorder=1)
     clean_axes(ax)
     money_axis(ax)

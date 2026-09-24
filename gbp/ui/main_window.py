@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
+    QCheckBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -45,6 +46,7 @@ from .panels.scenario_panel import ScenarioPanel
 from .panels.settings_panel import SettingsPanel
 from .panels.strategies_panel import StrategiesPanel
 from .sample_case import build_sample_case, empty_case
+from .solver_dialog import SolverDialog
 from .theme import INK, INK_SOFT, NAVY, STYLESHEET, format_number
 from .worker import start_simulation, start_task
 
@@ -87,6 +89,9 @@ class MainWindow(QMainWindow):
         self._pending_scenario = None
         self._export_thread = None
         self._export_worker = None
+        # Último resultado del solver y la firma del caso sobre el que se hizo.
+        self._last_solve = None
+        self._last_solve_signature = None
 
         self._session_timer = QTimer(self)
         self._session_timer.setSingleShot(True)
@@ -103,6 +108,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._build_menu()
         self._refresh_dependent_views()
+        self._apply_result_view()
         if self._restored_session:
             nombre = self.current_path.name if self.current_path else self.scenario.name
             self.status.setText(f"Se restauró la sesión anterior: {nombre}")
@@ -201,6 +207,13 @@ class MainWindow(QMainWindow):
         )
         run_bar.insertWidget(1, self.export_button)  # junto a «Correr», antes de la barra
 
+        # La vista en pesos, como la casilla de percentiles: cambia cómo se leen
+        # las cifras, no la corrida. Apagada y deshabilitada mientras el caso no
+        # tenga tasa, así que quien no la usa no ve ninguna diferencia.
+        self.cop_toggle = QCheckBox("Ver en COP")
+        self.cop_toggle.toggled.connect(self._apply_result_view)
+        run_bar.addWidget(self.cop_toggle)
+
         self.status = QLabel("")
         self.status.setStyleSheet(f"color: {INK};")
         run_bar.addWidget(self.status, 2)
@@ -297,6 +310,14 @@ class MainWindow(QMainWindow):
         run_action.triggered.connect(self.run_simulation)
         run_menu.addAction(run_action)
 
+        solver_action = QAction("&Solver…", self)
+        solver_action.setShortcut("Ctrl+R")
+        solver_action.setToolTip(
+            "Qué retiro, aporte o capital logra una probabilidad objetivo"
+        )
+        solver_action.triggered.connect(self.open_solver)
+        run_menu.addAction(solver_action)
+
         run_menu.addSeparator()
         # Se deja la acción también en el menú, pero el botón vive junto a los
         # resultados: es ahí donde se decide exportar, no en Archivo.
@@ -313,13 +334,80 @@ class MainWindow(QMainWindow):
         self.strategies_panel.capital_panel.refresh_inherited()
         self._refresh_timer.start(200)
         self._schedule_session_save()
+        self._apply_result_view()
         self._flag_stale_results()
 
+    def _apply_result_view(self, *_):
+        """Moneda y metas de lectura, del caso vivo; no piden volver a simular."""
+        spot = self.scenario.fx_spot if self.scenario.has_fx else None
+        self.cop_toggle.setEnabled(spot is not None)
+        if spot is None:
+            self.cop_toggle.blockSignals(True)
+            self.cop_toggle.setChecked(False)
+            self.cop_toggle.blockSignals(False)
+            self.cop_toggle.setToolTip(
+                "Escribe una tasa USD/COP en la pestaña Escenario para ver las cifras en pesos."
+            )
+        else:
+            self.cop_toggle.setToolTip(
+                f"Todas las cifras en pesos a una tasa fija de {format_number(spot)} COP "
+                "por USD. Las probabilidades no cambian."
+            )
+        rate = spot if (spot is not None and self.cop_toggle.isChecked()) else None
+        self.results.set_view(rate, self.scenario.goals)
+
+    # ------------------------------------------------------------------
+    def open_solver(self):
+        try:
+            self.scenario.validate(self.cmas)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Revisa el caso", str(exc))
+            return
+        SolverDialog(self).exec()
+
+    @staticmethod
+    def _solve_signature(scenario) -> dict:
+        """Lo que decide el resultado del solver: todo el caso menos la tasa COP."""
+        data = dict(to_dict(scenario)["scenario"])
+        data.pop("fx_spot", None)
+        return data
+
+    def remember_solve(self, result, scenario):
+        self._last_solve = result
+        self._last_solve_signature = self._solve_signature(scenario)
+
+    def current_solve(self):
+        """El último resultado del solver, solo si el caso no cambió desde entonces."""
+        if self._last_solve is None:
+            return None
+        if self._solve_signature(self.scenario) != self._last_solve_signature:
+            return None
+        return self._last_solve
+
+    def after_external_edit(self):
+        """Un cambio al caso hecho fuera de los paneles (el solver al aplicar)."""
+        self.scenario_panel.reload(self.scenario)
+        self.strategies_panel.reload(
+            self.scenario, self.cmas, self.available_assets, self.resolver
+        )
+        self._on_scenario_changed()
+
+    @staticmethod
+    def _simulation_signature(scenario) -> dict:
+        """Lo del caso que entra a la simulación: todo menos metas y tasa COP."""
+        data = dict(to_dict(scenario)["scenario"])
+        data.pop("goals", None)
+        data.pop("fx_spot", None)
+        return data
+
     def results_are_stale(self) -> bool:
-        """Si el caso cambió desde la corrida que se está mostrando."""
+        """Si el caso cambió, en algo que se simula, desde la corrida mostrada."""
         if self._run_scenario is None:
             return False
-        return to_dict(self.scenario)["scenario"] != to_dict(self._run_scenario)["scenario"]
+        return (
+            self._simulation_signature(self.scenario)
+            != self._simulation_signature(self._run_scenario)
+        )
 
     def _flag_stale_results(self):
         # Con una corrida en curso la barra de estado es del progreso.
@@ -412,6 +500,7 @@ class MainWindow(QMainWindow):
         )
         self.results.clear()
         self._run_scenario = None
+        self._apply_result_view()
         self.export_action.setEnabled(False)  # el informe siempre describe una corrida
         self._refresh_dependent_views(force=True)
         self._schedule_session_save()
@@ -578,7 +667,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def export_report(self):
         """Informe PDF de la última corrida, para el archivo y para el cliente."""
-        result = self.results.result
+        # La corrida tal como salió, en USD: la vista en COP la arma el informe
+        # con la tasa, para convertir con ella también los montos del caso.
+        result = self.results.base_result
         if result is None:
             QMessageBox.information(
                 self,
@@ -591,7 +682,11 @@ class MainWindow(QMainWindow):
         # El informe describe **la corrida**: sus supuestos, sus flujos y sus
         # cifras vienen de la copia simulada. Mezclar el caso vivo con un
         # resultado viejo imprimiría supuestos que no generaron esas cifras.
-        scenario = self._run_scenario or self.scenario
+        # Metas y tasa sí son del caso vivo: no entran a la simulación, así que
+        # agregarlas después de correr no deja el informe desactualizado.
+        scenario = deepcopy(self._run_scenario or self.scenario)
+        scenario.goals = deepcopy(self.scenario.goals)
+        scenario.fx_spot = self.scenario.fx_spot
         if self.results_are_stale() and QMessageBox.question(
             self,
             "El caso cambió",
@@ -605,7 +700,11 @@ class MainWindow(QMainWindow):
             return
 
         has_debt = any(s.has_debt for s in result.strategies)
-        dialog = ExportDialog(scenario.name, has_debt, self)
+        solve = self.current_solve()
+        dialog = ExportDialog(
+            scenario.name, has_debt, self,
+            has_goals=bool(scenario.goals), has_solve=solve is not None,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -613,6 +712,10 @@ class MainWindow(QMainWindow):
         options.resolver = self.resolver
         options.cmas = self.cmas
         options.show_percentile_labels = self.results.show_percentile_labels
+        # El informe sale en la moneda que se está viendo, igual que las
+        # etiquetas de percentiles.
+        options.fx_spot = self.results.fx_rate
+        options.solve = solve
         suggested = f"{options.title} — {scenario.name}.pdf".replace("/", "-")
         path, _ = QFileDialog.getSaveFileName(
             self, "Guardar informe", suggested, "Documentos PDF (*.pdf)"

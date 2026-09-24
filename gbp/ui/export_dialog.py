@@ -36,7 +36,8 @@ from .theme import INK_SOFT
 class ExportDialog(QDialog):
     """Datos de portada y secciones del informe."""
 
-    def __init__(self, scenario_name: str, has_debt: bool, parent=None):
+    def __init__(self, scenario_name: str, has_debt: bool, parent=None,
+                 has_goals: bool = False, has_solve: bool = False):
         super().__init__(parent)
         self.setWindowTitle("Exportar informe PDF")
         self.setMinimumWidth(560)
@@ -111,6 +112,20 @@ class ExportDialog(QDialog):
             self.debt.setText("Deuda y llamadas a margen (el caso no tiene crédito)")
         # Justo antes del aviso legal, que es el orden en que salen en el PDF.
         sections_layout.insertWidget(4, self.debt)
+        # Las secciones opcionales solo aparecen si hay algo que poner en ellas:
+        # sin metas ni solver la ventana es exactamente la de siempre.
+        self.goals = QCheckBox("Metas y su probabilidad de cumplirse")
+        self.goals.setChecked(has_goals)
+        self.goals.setVisible(has_goals)
+        sections_layout.insertWidget(5, self.goals)
+        self.solve = QCheckBox("Resultado del solver")
+        self.solve.setToolTip(
+            "La pregunta que se le hizo al solver, el valor que encontró y la "
+            "probabilidad lograda. Solo si el caso no cambió desde que se resolvió."
+        )
+        self.solve.setChecked(False)
+        self.solve.setVisible(has_solve)
+        sections_layout.insertWidget(6, self.solve)
         annex_note = QLabel(
             "Los supuestos resumen y la asignación llevan su tabla debajo de su "
             "propia gráfica. Las demás salen al final, en un anexo con una hoja por "
@@ -146,6 +161,10 @@ class ExportDialog(QDialog):
             include_inputs=self.inputs.isChecked(),
             include_flows=self.flows.isChecked(),
             include_disclaimer=self.disclaimer.isChecked(),
+            # `isHidden` y no `isVisible`: con la ventana ya cerrada toda
+            # casilla da «no visible», y solo importa si se ocultó a propósito.
+            include_goals=not self.goals.isHidden() and self.goals.isChecked(),
+            include_solve=not self.solve.isHidden() and self.solve.isChecked(),
         )
 
     def remember(self) -> None:

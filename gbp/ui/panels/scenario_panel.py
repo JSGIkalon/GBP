@@ -1,4 +1,4 @@
-"""Panel del escenario: nombre, capital inicial, horizonte e inflación."""
+"""Panel del escenario: nombre, capital, horizonte, inflación, tasa COP y metas."""
 
 from __future__ import annotations
 
@@ -16,8 +16,16 @@ from PySide6.QtWidgets import (
 )
 
 from ...model.scenario import Scenario
-from ..theme import (INK, INK_SOFT, STATUS_WARNING, format_money, format_number, status_dot,
-                     use_thousands_dot)
+from ..theme import (
+    INK,
+    INK_SOFT,
+    STATUS_WARNING,
+    format_money,
+    format_number,
+    status_dot,
+    use_thousands_dot,
+)
+from .goals_panel import GoalsPanel
 
 
 class ScenarioPanel(QWidget):
@@ -78,15 +86,36 @@ class ScenarioPanel(QWidget):
         self.inflation.valueChanged.connect(self._on_change)
         form.addRow("Inflación anual", self.inflation)
 
+        # Opcional: en cero no hay tasa y la casilla «Ver en COP» queda apagada.
+        self.fx_spot = QDoubleSpinBox()
+        self.fx_spot.setRange(0.0, 1_000_000.0)
+        self.fx_spot.setDecimals(2)
+        self.fx_spot.setSingleStep(10.0)
+        self.fx_spot.setSpecialValueText("Sin tasa")
+        self.fx_spot.setSuffix(" COP por USD")
+        self.fx_spot.valueChanged.connect(self._on_change)
+        self.fx_spot.setToolTip(
+            "Solo para ver los resultados en pesos colombianos: todas las cifras se "
+            "multiplican por esta tasa fija. No cambia la simulación ni las "
+            "probabilidades."
+        )
+        form.addRow("Tasa USD/COP (opcional)", self.fx_spot)
+
         layout.addLayout(form)
 
         note = QLabel(
             "La inflación indexa los flujos marcados como tales y permite ver los "
-            "resultados en poder adquisitivo de hoy."
+            "resultados en poder adquisitivo de hoy. La tasa USD/COP es opcional y "
+            "solo sirve para mostrar las cifras en pesos a una tasa fija."
         )
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {INK_SOFT};")
         layout.addWidget(note)
+
+        layout.addSpacing(8)
+        self.goals_panel = GoalsPanel(scenario.goals)
+        self.goals_panel.changed.connect(self.changed.emit)
+        layout.addWidget(self.goals_panel)
         layout.addStretch(1)
 
         # Empezar de cero tiene que ser un botón visible, no una entrada de menú.
@@ -118,6 +147,8 @@ class ScenarioPanel(QWidget):
         self.initial_value.setValue(scenario.initial_value)
         self.horizon.setValue(scenario.horizon)
         self.inflation.setValue(scenario.inflation * 100.0)
+        self.fx_spot.setValue(scenario.fx_spot or 0.0)
+        self.goals_panel.reload(scenario.goals)
         self._loading = False
         self._update_initial_hint()
 
@@ -155,5 +186,6 @@ class ScenarioPanel(QWidget):
         self.scenario.initial_value = self.initial_value.value()
         self.scenario.horizon = self.horizon.value()
         self.scenario.inflation = self.inflation.value() / 100.0
+        self.scenario.fx_spot = self.fx_spot.value() or None
         self._update_initial_hint()
         self.changed.emit()

@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     # más tarda en cargar y la mayoría de las sesiones no exportan nada.
     from matplotlib.backends.backend_pdf import PdfPages
 
+from ..model.goals import goal_probability
 from ..model.groups import group_summary
 from .caseio import used_custom_assets
 from ..model.results import SimulationResult
@@ -112,6 +113,13 @@ class ReportOptions:
     include_inputs: bool = True
     include_flows: bool = True
     include_disclaimer: bool = True
+    # Opcionales: sin metas en el caso, o sin un solver vigente, no hay lámina.
+    include_goals: bool = True
+    include_solve: bool = False
+    solve: object | None = None
+    # Vista en pesos: la tasa fija por la que se multiplican todas las cifras
+    # en dinero. `None` es el informe de siempre, en la moneda de los supuestos.
+    fx_spot: float | None = None
     # Lo decide la casilla de la pantalla, no la ventana de exportación: el
     # informe sale con las mismas etiquetas de percentiles que se estaban viendo.
     show_percentile_labels: bool = True
@@ -234,9 +242,30 @@ def _wrap(text: str, width: int) -> list[str]:
 # de mirar un solo resultado. El mismo patrón "número grande / eyebrow debajo"
 # que usan las tarjetas KPI del cuerpo, para que la portada anticipe el
 # lenguaje visual del resto del informe en vez de abrir con un párrafo.
-def _cover_kpis(scenario: Scenario, result: SimulationResult) -> list[tuple[str, str]]:
+def _money(value: float, options: ReportOptions) -> str:
+    """Un monto **del caso** (capital, flujo, crédito) en la moneda del informe.
+
+    Los resultados ya llegan convertidos; los inputs del caso se definen en la
+    moneda de los supuestos y se convierten aquí, con la misma tasa, para que
+    el documento no mezcle dos monedas.
+    """
+    return format_money(value * (options.fx_spot or 1.0))
+
+
+def _currency_note(options: ReportOptions) -> str:
+    if not options.fx_spot:
+        return ""
+    return (
+        f"Cifras en pesos colombianos (COP) a una tasa fija de "
+        f"{format_number(options.fx_spot)} COP por USD; el caso se proyecta en USD."
+    )
+
+
+def _cover_kpis(scenario: Scenario, result: SimulationResult,
+                options: ReportOptions) -> list[tuple[str, str]]:
+    capital = "Capital inicial (COP)" if options.fx_spot else "Capital inicial"
     return [
-        (format_money(scenario.initial_value), "Capital inicial"),
+        (_money(scenario.initial_value, options), capital),
         (f"{scenario.horizon} años", "Horizonte"),
         (f"{scenario.inflation:.2%}", "Inflación anual"),
         (format_number(result.n_paths), "Simulaciones"),
@@ -266,16 +295,24 @@ def _cover(pdf: PdfPages, options: ReportOptions, scenario: Scenario,
     if ficha:
         figure.text(MARGIN, y, ficha, color=INK_SOFT, fontsize=10)
         y -= 0.045
+    if options.fx_spot:
+        figure.text(MARGIN, y, _currency_note(options), color=INK_SOFT, fontsize=10)
+        y -= 0.045
 
     # Las cuatro tarjetas de cabecera, repartidas a ancho igual sobre el
     # margen de la página.
     _add_rule(figure, y)
     y -= 0.05
-    kpis = _cover_kpis(scenario, result)
+    kpis = _cover_kpis(scenario, result, options)
     ancho = (1 - 2 * MARGIN) / len(kpis)
     for i, (value, label) in enumerate(kpis):
         x = MARGIN + i * ancho
-        figure.text(x, y, value, color=NAVY, fontsize=26, fontweight="semibold", va="top")
+        # Con cifras completas —y más en COP— el capital puede no caber en su
+        # cuarto de página a 26 puntos: la letra se achica hasta que quepa.
+        ancho_pts = ancho * PAGE_SIZE[0] * 72 * 0.94
+        fontsize = min(26.0, ancho_pts / (max(len(value), 1) * 0.6))
+        figure.text(x, y, value, color=NAVY, fontsize=fontsize, fontweight="semibold",
+                    va="top")
         figure.text(x, y - 0.075, label.upper(), color=INK_SOFT, fontsize=8.5,
                     fontweight="semibold")
     y -= 0.12
@@ -894,7 +931,7 @@ class _Column:
         self.y -= height
 
 
-def _flow_text(flow) -> str:
+def _flow_text(flow, options: ReportOptions) -> str:
     """Una línea que describe el flujo tal como se configuró."""
     if flow.is_percentage:
         return (
@@ -905,7 +942,7 @@ def _flow_text(flow) -> str:
         )
     return (
         f"{flow.kind.value.capitalize()} · {flow.name}: "
-        f"{format_money(flow.amount)} al año, años "
+        f"{_money(flow.amount, options)} al año, años "
         f"{flow.start_year}–{flow.end_year}"
         f"{', indexado a inflación' if flow.inflation_indexed else ''}"
         f"{f', crecimiento real {flow.growth:.2%}' if flow.growth else ''}"
@@ -923,8 +960,8 @@ def _strategy_paragraphs(strategy, scenario: Scenario,
         f"{name} {weight:.1%}" for name, weight in strategy.weights.items()
     ) or "sin pesos definidos"
     capital = (
-        format_money(strategy.initial_value) if strategy.has_own_initial
-        else f"{format_money(scenario.initial_value)} (del escenario)"
+        _money(strategy.initial_value, options) if strategy.has_own_initial
+        else f"{_money(scenario.initial_value, options)} (del escenario)"
     )
 
     parrafos: list[tuple[str, dict]] = [
@@ -934,7 +971,7 @@ def _strategy_paragraphs(strategy, scenario: Scenario,
     ]
 
     if strategy.cashflows:
-        parrafos.extend((_flow_text(f), {}) for f in strategy.cashflows)
+        parrafos.extend((_flow_text(f, options), {}) for f in strategy.cashflows)
     else:
         parrafos.append(("Sin flujos.", {"color": INK_SOFT}))
 
@@ -950,7 +987,7 @@ def _strategy_paragraphs(strategy, scenario: Scenario,
             if loan.max_ltv is not None else ", sin control de LTV"
         )
         parrafos.append((
-            f"Crédito · {loan.name}: {format_money(loan.principal)} en el año "
+            f"Crédito · {loan.name}: {_money(loan.principal, options)} en el año "
             f"{loan.start_year}, plazo {loan.term_years} años, {tasa}, intereses "
             f"{loan.interest_mode.value}, amortización {loan.amortization.value}{ltv}",
             {},
@@ -966,11 +1003,13 @@ def _write_case_inputs(col: _Column, scenario: Scenario, options: ReportOptions)
     col.title("Con qué se construyó esta proyección")
     col.heading("ESCENARIO")
     for label, value in (
-        ("Capital inicial", format_money(scenario.initial_value)),
+        ("Capital inicial", _money(scenario.initial_value, options)),
         ("Horizonte", f"{scenario.horizon} años"),
         ("Inflación anual", f"{scenario.inflation:.2%}"),
     ):
         col.pair(label, value)
+    if options.fx_spot:
+        col.pair("Moneda", f"COP a {format_number(options.fx_spot)} por USD, tasa fija")
 
     for i, strategy in enumerate(scenario.strategies):
         # La estrategia se mide entera y se pide sitio de una vez: partida entre
@@ -1288,6 +1327,63 @@ def _flows_table(result: SimulationResult) -> _AnnexTable | None:
     )
 
 
+def _goals_rows(scenario: Scenario, result: SimulationResult,
+                options: ReportOptions) -> tuple[list[str], list[list[str]]]:
+    """Una fila por meta, una columna de probabilidad por estrategia.
+
+    Se mide sobre la corrida en su moneda original: la meta se define en esa
+    moneda, y la conversión a COP no cambia ninguna probabilidad.
+    """
+    columnas = ["Meta", "Año", "Monto", "Unidad", "Prioridad", *result.names]
+    filas = []
+    for goal in scenario.goals:
+        fila = [
+            goal.name,
+            "final" if goal.year is None else str(goal.year),
+            _money(goal.amount, options),
+            "moneda de hoy" if goal.real else "nominal",
+            goal.priority.value,
+        ]
+        for strategy in result.strategies:
+            p = goal_probability(strategy, goal)
+            fila.append("fuera del horizonte" if np.isnan(p) else f"{p:.1%}")
+        filas.append(fila)
+    return columnas, filas
+
+
+def _solver_page(pdf: PdfPages, options: ReportOptions, page_no: int, solve) -> int:
+    """La pregunta que se le hizo al solver y lo que respondió."""
+    def valor(v):
+        if v is None:
+            return "—"
+        return f"{v:.2%} del patrimonio" if solve.is_percentage else _money(v, options)
+
+    buscado = "máximo" if solve.maximize else "mínimo"
+    filas = [
+        ["Estrategia", solve.strategy_name],
+        ["Cifra ajustada", solve.variable_label],
+        ["Probabilidad medida", solve.metric_label],
+        ["Objetivo", f"al menos {solve.target:.1%}"],
+        # Sin flecha: la tipografía del informe no la trae.
+        ["Valor actual del caso", f"{valor(solve.current_value)}, con probabilidad "
+                                  f"{solve.current_probability:.1%}"],
+        [f"Valor {buscado} que cumple", valor(solve.value)],
+        ["Probabilidad lograda", "—" if solve.achieved is None else f"{solve.achieved:.1%}"],
+    ]
+    if solve.message:
+        filas.append(["Nota", solve.message])
+    return _table_pages(
+        pdf, options, page_no, "Solver",
+        "Qué cifra del plan logra la probabilidad objetivo", ["", "Valor"], filas,
+        footnote=(
+            f"Búsqueda por bisección sobre los mismos {format_number(solve.n_paths)} caminos "
+            "de mercado de la corrida: entre prueba y prueba solo cambia la cifra ajustada, "
+            "así que la probabilidad sube o baja de forma ordenada. El valor se redondea "
+            f"hacia el lado que no rompe el objetivo. {_currency_note(options)}"
+        ).strip(),
+    )
+
+
 def _cite(annex: list[_StrategyAnnex], kind: str, extra: str = "") -> str:
     """Remite a las hojas del anexo que traen el detalle de un tema.
 
@@ -1332,12 +1428,25 @@ def build_report(
     # no se configura: la distribución se imprime en las dos y el resumen usa la
     # que se lee en un extracto.
     real = False
-    years = settings.milestones_within(scenario.horizon)
-    moneda = "Valores nominales."
+    # Las metas se miden sobre la corrida original; la conversión a COP es
+    # solo de lectura y no cambia ninguna probabilidad.
+    base_result = result
+    if options.fx_spot:
+        result = result.in_currency(options.fx_spot)
+    nota_moneda = _currency_note(options)
+    years = settings.milestones_within(result.horizon)
+    moneda = f"Valores nominales. {nota_moneda}".strip()
     con_deuda = options.include_debt and any(s.has_debt for s in result.strategies)
 
     annex = _build_annex(options, scenario, result, years, con_deuda)
     flows = _flows_table(result) if options.include_flows else None
+    if flows is not None and nota_moneda:
+        flows.footnote = f"{flows.footnote} {nota_moneda}"
+    metas = (
+        _goals_rows(scenario, base_result, options)
+        if options.include_goals and scenario.goals else None
+    )
+    solver = options.solve if options.include_solve else None
 
     with PdfPages(path) as pdf:
         _cover(pdf, options, scenario, result, settings)
@@ -1373,6 +1482,7 @@ def build_report(
                     "Valores en moneda de hoy, descontados a la inflación del escenario."
                     if es_real else "Valores nominales."
                 )
+                unidad = f"{unidad} {nota_moneda}".strip()
                 page = _chart_page(
                     pdf, options, page,
                     f"Distribución · {'moneda de hoy' if es_real else 'nominal'}",
@@ -1393,7 +1503,7 @@ def build_report(
                 lambda canvas: draw_debt_chart(canvas, result),
                 _cite(
                     annex, DEBT,
-                    "Línea: mediana. Banda: percentil 5 al 95.",
+                    f"Línea: mediana. Banda: percentil 5 al 95. {nota_moneda}".strip(),
                 ),
             )
 
@@ -1403,6 +1513,22 @@ def build_report(
                 eyebrow="Flujos y valor de portafolio",
                 lede="Flujos netos y patrimonio mediano, año por año",
             )
+
+        if metas is not None:
+            columnas, filas = metas
+            page = _table_pages(
+                pdf, options, page, "Metas",
+                "Probabilidad de cumplir cada meta", columnas, filas,
+                footnote=(
+                    "Una meta se cumple en un camino si el patrimonio neto de ese año "
+                    "es al menos el monto y el portafolio no se agotó antes. Las metas "
+                    "no cambian la simulación: se miden sobre los mismos caminos. "
+                    f"{nota_moneda}"
+                ).strip(),
+            )
+
+        if solver is not None:
+            page = _solver_page(pdf, options, page, solver)
 
         for anexo in annex:
             page = _strategy_annex_page(
