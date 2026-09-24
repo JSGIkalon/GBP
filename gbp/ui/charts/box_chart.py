@@ -33,6 +33,33 @@ from ..theme import (
 MIN_WIDTH_FOR_LABELS = 0.030
 
 
+def _box_stats(strategy, years: list[int], real: bool) -> list[dict]:
+    """Percentiles, media y desviación de cada año hito, sin escalar.
+
+    Se guardan en la propia estrategia porque calcularlos es lo caro del
+    gráfico: con un millón de caminos, ocultar o mostrar las etiquetas de
+    percentiles tardaba segundos recalculando cifras que no habían cambiado.
+    El resultado de una corrida no se modifica después, así que la caché no
+    puede quedar vieja.
+    """
+    cache = strategy.__dict__.setdefault("_box_stats_cache", {})
+    key = (tuple(years), real)
+    if key not in cache:
+        data = strategy.values(real)[:, [y - 1 for y in years]]
+        p10, p25, p50, p75, p90 = np.percentile(data, [10, 25, 50, 75, 90], axis=0)
+        means = data.mean(axis=0)
+        stds = data.std(axis=0)
+        cache[key] = [
+            {
+                "med": float(p50[i]), "q1": float(p25[i]), "q3": float(p75[i]),
+                "whislo": float(p10[i]), "whishi": float(p90[i]),
+                "mean": float(means[i]), "std": float(stds[i]),
+            }
+            for i in range(len(years))
+        ]
+    return cache[key]
+
+
 def draw_box_chart(
     canvas, result: SimulationResult, years: list[int], real: bool = False,
     show_percentile_labels: bool = True,
@@ -47,10 +74,9 @@ def draw_box_chart(
     box_width = group_width / n_strategies * 0.72
     positions_base = np.arange(len(years), dtype=float)
 
-    peak = max(
-        float(np.abs(np.percentile(s.values(real)[:, [y - 1 for y in years]], 90)).max())
-        for s in result.strategies
-    )
+    raw_stats = [_box_stats(s, years, real) for s in result.strategies]
+    peak = max(abs(stat[k]) for stats in raw_stats for stat in stats
+               for k in ("whishi", "whislo"))
     scale = 1_000_000.0 if peak >= 1_000_000 else 1.0
     unit = "millones" if scale > 1 else "unidades"
 
@@ -62,27 +88,15 @@ def draw_box_chart(
     boxes_to_label: list[tuple[float, dict, str]] = []
 
     for i, strategy in enumerate(result.strategies):
-        data = strategy.values(real)[:, [y - 1 for y in years]] / scale
         offset = (i - (n_strategies - 1) / 2) * (group_width / n_strategies)
         positions = positions_base + offset
         color = series_color(i)
         on_fill = series_text_color(i)
 
-        stats = []
-        for column in data.T:
-            p10, p25, p50, p75, p90 = np.percentile(column, [10, 25, 50, 75, 90])
-            stats.append(
-                {
-                    "med": p50,
-                    "q1": p25,
-                    "q3": p75,
-                    "whislo": p10,
-                    "whishi": p90,
-                    "fliers": [],
-                    "mean": float(column.mean()),
-                    "std": float(column.std()),
-                }
-            )
+        stats = [
+            {**{k: v / scale for k, v in stat.items()}, "fliers": []}
+            for stat in raw_stats[i]
+        ]
 
         ax.bxp(
             stats,

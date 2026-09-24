@@ -275,12 +275,12 @@ def test_el_anexo_de_flujos_trae_la_serie_ano_por_ano(corrida):
 
 
 def test_el_retiro_indexado_crece_con_la_inflacion(corrida):
-    """El retiro de 800k del año 1 tiene que valer 800k·1.025^y en el año y."""
+    """El retiro de 800k vale 800k el año 1 y 800k·1.025^(y-1) en el año y."""
     escenario, result, _ = corrida
     serie = result.by_name("Sin deuda").flow_history()
 
     for year in (1, 10, 20):
-        esperado = 800_000.0 * 1.025 ** year
+        esperado = 800_000.0 * 1.025 ** (year - 1)
         assert serie["retiros"][year - 1] == pytest.approx(esperado)
     assert not serie["aportes"].any()
 
@@ -346,3 +346,61 @@ def test_el_progreso_es_opcional(escenario, simple_cmas, simple_corr):
     result = simulate(escenario, simple_cmas, simple_corr,
                       SimulationSettings(n_paths=200, seed=5))
     assert len(result.strategies) == 2
+
+
+@pytest.mark.parametrize("mostrar", [True, False])
+def test_el_informe_respeta_la_casilla_de_percentiles(corrida, tmp_path, monkeypatch, mostrar):
+    """Si en pantalla están ocultos, el PDF tampoco los trae."""
+    import gbp.io.report as report
+
+    vistos = []
+    original = report.draw_box_chart
+
+    def espia(*args, show_percentile_labels=True, **kwargs):
+        vistos.append(show_percentile_labels)
+        return original(*args, show_percentile_labels=show_percentile_labels, **kwargs)
+
+    monkeypatch.setattr(report, "draw_box_chart", espia)
+    escenario, result, settings = corrida
+    build_report(tmp_path / "informe.pdf",
+                 ReportOptions(show_percentile_labels=mostrar),
+                 escenario, result, settings)
+    assert vistos == [mostrar, mostrar]  # nominal y moneda de hoy
+
+
+def test_ocultar_percentiles_deja_solo_la_mediana(corrida):
+    from matplotlib.figure import Figure
+
+    from gbp.io.report import _FigureCanvas
+    from gbp.ui.charts.box_chart import draw_box_chart
+
+    _, result, settings = corrida
+    years = settings.milestone_years
+
+    def etiquetas(mostrar):
+        figura = Figure(figsize=(11, 8.5))
+        draw_box_chart(_FigureCanvas(figura), result, years,
+                       show_percentile_labels=mostrar)
+        return len(figura.axes[0].texts)
+
+    cajas = len(result.strategies) * len(years)
+    assert etiquetas(False) == cajas          # una mediana por caja
+    assert etiquetas(True) > cajas
+
+
+def test_las_cifras_del_grafico_coinciden_con_la_tabla(corrida):
+    """La caché del box plot no puede alterar los percentiles."""
+    import numpy as np
+
+    from gbp.ui.charts.box_chart import _box_stats
+
+    _, result, settings = corrida
+    years = settings.milestone_years
+    for strategy in result.strategies:
+        for real in (False, True):
+            stats = _box_stats(strategy, years, real)
+            pct = strategy.percentiles(years, real)
+            assert [s["med"] for s in stats] == pytest.approx(list(pct[50]))
+            assert [s["whislo"] for s in stats] == pytest.approx(list(pct[10]))
+            assert _box_stats(strategy, years, real) is stats  # segunda vez, de caché
+            assert np.isfinite([s["std"] for s in stats]).all()

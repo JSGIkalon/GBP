@@ -416,6 +416,38 @@ Activos propios: la app deja de servir solo para patrimonios en EE.UU.
   camino es dejar elegir un activo de referencia concreto — la regla está
   aislada en `extend_correlations`, así que no obliga a rehacer nada.
 
+## Sesión 17 — 23 sep 2026
+
+Correcciones pedidas tras usar la versión instalada.
+
+**Hecho**
+
+- **Los flujos se indexan desde el año 2.** El monto ingresado es el del año 1,
+  con factor `(1 + inflación)^(año − 1)`. Se aparta de J.P. Morgan, que indexa
+  desde el año 1; el caso de la lámina 9 pasa de 47.2MM a 46.0MM de retiros
+  totales.
+- **Mostrar u ocultar los percentiles del box plot es instantáneo.** Cada clic
+  recalculaba los percentiles de los dos gráficos sobre todos los caminos. Ahora
+  `_box_stats` los calcula una vez por corrida y los guarda en la estrategia.
+  Con 1.000.000 de simulaciones pasó a unos 0,27 s.
+- **El PDF respeta la casilla de percentiles.** `ReportOptions.show_percentile_labels`
+  toma el estado de la pantalla: si están ocultos, el informe sale sin ellos.
+- **Fuera los comentarios de veredicto**: la frase «X es la estrategia con mayor
+  probabilidad de sostener el plan…» de la pestaña Supuestos, su equivalente en
+  la portada del PDF y el resumen de la barra de estado. La probabilidad de éxito
+  sigue en la tabla de supuestos resumen.
+- `build_exe.ps1` pide cerrar GBP antes de matarlo, para que se guarde la sesión.
+- 188 tests en verde.
+
+**Decisiones y hallazgos**
+
+- **La sesión sí se restauraba.** Probado con una copia de los datos reales, la
+  app abre el último caso. Lo que se perdió fue culpa de la prueba del
+  instalador de la sesión 16: abrió la app instalada **sin aislar la carpeta de
+  datos** y le pasó un caso de prueba, que reemplazó la sesión del usuario. Las
+  pruebas de la app congelada tienen que correr con `GBP_DATA_DIR` apuntando a
+  una carpeta temporal, igual que los tests.
+
 ## Sesión 16 — 23 sep 2026
 
 GBP deja de ser un .exe portable y pasa a instalarse.

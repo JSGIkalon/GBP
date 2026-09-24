@@ -116,7 +116,7 @@ def test_aportes_y_retiros_se_aplican(deterministic_cmas, deterministic_corr):
 
 
 def test_flujos_se_indexan_a_la_inflacion(deterministic_cmas, deterministic_corr):
-    """Un retiro indexado crece con la inflacion desde el primer ano."""
+    """Un retiro indexado vale lo ingresado el ano 1 y crece desde el ano 2."""
     scenario = _scenario(
         horizon=2,
         initial_value=1000.0,
@@ -127,9 +127,9 @@ def test_flujos_se_indexan_a_la_inflacion(deterministic_cmas, deterministic_corr
         scenario, deterministic_cmas, deterministic_corr, SimulationSettings(n_paths=200, seed=2)
     )
     wealth = result.strategies[0].wealth.mean(axis=0)
-    # Ano 1: 1000*1.05 - 110 = 940 ; ano 2: 940*1.05 - 121 = 866
-    assert wealth[0] == pytest.approx(940.0)
-    assert wealth[1] == pytest.approx(866.0)
+    # Ano 1: 1000*1.05 - 100 = 950 ; ano 2: 950*1.05 - 110 = 887.5
+    assert wealth[0] == pytest.approx(950.0)
+    assert wealth[1] == pytest.approx(887.5)
 
 
 def test_misma_semilla_da_el_mismo_resultado(simple_cmas, simple_corr):

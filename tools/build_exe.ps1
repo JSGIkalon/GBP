@@ -43,6 +43,11 @@ if (-not $iscc) {
 $started = Get-Date
 
 Write-Host "Cerrando instancias de GBP.exe en ejecucion..."
+# Primero se pide cerrar la ventana, que dispara closeEvent y guarda la sesion
+# del usuario. Matar el proceso de entrada se saltaba ese guardado.
+$abiertos = Get-Process GBP -ErrorAction SilentlyContinue
+foreach ($p in $abiertos) { [void]$p.CloseMainWindow() }
+foreach ($p in $abiertos) { [void]$p.WaitForExit(5000) }
 Get-Process GBP -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
 

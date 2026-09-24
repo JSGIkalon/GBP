@@ -35,7 +35,7 @@ from ..charts.allocation_chart import allocation_table_rows, draw_allocation_cha
 from ..charts.box_chart import distribution_table_rows, draw_box_chart
 from ..charts.canvas import ChartCanvas
 from ..charts.debt_chart import draw_debt_chart
-from ..theme import BLUE_MID, INK_SOFT, format_money, status_color, status_dot
+from ..theme import format_money
 
 EMPTY = "Carga los datos del caso y pulsa «Correr simulación»."
 
@@ -118,10 +118,6 @@ class ResultsPanel(QTabWidget):
         # --- Supuestos --------------------------------------------------
         summary = QWidget()
         s_layout = QVBoxLayout(summary)
-        self.headline = QLabel(EMPTY)
-        self.headline.setWordWrap(True)
-        self.headline.setStyleSheet("font-size: 13px;")
-        s_layout.addWidget(self.headline)
         self.summary_columns = [
             "Indicador", *[f"Estrategia {i + 1}" for i in range(8)]
         ]
@@ -219,7 +215,6 @@ class ResultsPanel(QTabWidget):
         self.years = []
         for canvas in (self.box_canvas, self.real_canvas, self.debt_canvas):
             canvas.show_message(EMPTY)
-        self.headline.setText(EMPTY)
         for table in (self.range_table, self.real_table, self.summary_table, self.debt_table,
                       self.flows_table):
             table.setRowCount(0)
@@ -319,25 +314,6 @@ class ResultsPanel(QTabWidget):
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
                 self.summary_table.setItem(r, c, item)
-
-        best = max(result.strategies, key=lambda s: s.success_probability)
-        probability = best.success_probability
-
-        # El color del semáforo vive solo dentro del círculo: el texto va en Ink
-        # y el énfasis lo lleva el azul de énfasis en la cifra que es el argumento.
-        lede = status_dot(
-            status_color(probability),
-            f"<b>{best.name}</b> es la estrategia con mayor probabilidad de sostener "
-            f"el plan: <b style='color:#007ABA;'>{probability:.1%}</b>",
-        )
-        detail = " · ".join(
-            f"{s.name} {s.success_probability:.1%}" for s in result.strategies
-        )
-        self.headline.setText(
-            f"<div style='font-size:15px;'>{lede}</div>"
-            f"<div style='color:{BLUE_MID}; margin-top:4px;'>{detail}</div>"
-            f"<div style='color:{INK_SOFT}; font-size:12px;'>{result.n_paths:,} simulaciones</div>"
-        )
 
     def _show_debt(self, result: SimulationResult):
         draw_debt_chart(self.debt_canvas, result)

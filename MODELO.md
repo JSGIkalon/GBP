@@ -276,14 +276,17 @@ ambos inclusive. El año 1 es el primer año proyectado.
 
 ### La convención de indexación
 
-El monto se ingresa en **moneda de hoy** (año 0) y se indexa desde el primer año
-proyectado, con factor `(1 + tasa)^año`
-([cashflows.py:60-74](gbp/model/cashflows.py#L60-L74)).
+El monto ingresado es **el que se paga el año 1**, y se indexa desde el año 2
+con factor `(1 + tasa)^(año − 1)`
+([cashflows.py](gbp/model/cashflows.py)). Un retiro de 1.000 con inflación de 5%
+vale 1.000 el año 1, 1.050 el año 2 y 1.102,5 el año 3. Un flujo que empieza más
+tarde también se expresa en pesos del año 1.
 
-Esta convención **no es arbitraria: se calibró contra la fuente**. El total de
-retiros del ejemplo de referencia daba 46,0MM contra los 47,2MM que publica
-J.P. Morgan —exactamente un año más de inflación. Con la convención correcta el
-total coincide al decimal.
+**Esto se aparta de J.P. Morgan a propósito.** J.P. Morgan indexa desde el año 1,
+con factor `(1 + tasa)^año`, y con esa convención el total de retiros del
+ejemplo de referencia coincidía al decimal con sus 47,2MM. Ikalon decidió que el
+monto que se ingresa es el del primer año, tal cual; con eso el mismo ejemplo da
+46,0MM, un año menos de inflación.
 
 ### Dos fuentes de crecimiento, acumulables
 

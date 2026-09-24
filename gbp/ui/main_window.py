@@ -491,11 +491,7 @@ class MainWindow(QMainWindow):
         self.run_button.setEnabled(True)
         self.export_action.setEnabled(True)
         self.progress.setVisible(False)
-        best = max(result.strategies, key=lambda s: s.success_probability)
-        self.status.setText(
-            f"{result.n_paths:,} simulaciones · mejor probabilidad de éxito: "
-            f"{best.success_probability:.1%} ({best.name})"
-        )
+        self.status.setText("Simulación terminada.")
         self._thread = None
 
     def _on_failed(self, message: str):
@@ -527,6 +523,7 @@ class MainWindow(QMainWindow):
         options = dialog.options()
         options.resolver = self.resolver
         options.cmas = self.cmas
+        options.show_percentile_labels = self.results.show_percentile_labels
         suggested = f"{options.title} — {self.scenario.name}.pdf".replace("/", "-")
         path, _ = QFileDialog.getSaveFileName(
             self, "Guardar informe", suggested, "Documentos PDF (*.pdf)"

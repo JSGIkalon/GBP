@@ -105,6 +105,9 @@ class ReportOptions:
     include_inputs: bool = True
     include_flows: bool = True
     include_disclaimer: bool = True
+    # Lo decide la casilla de la pantalla, no la ventana de exportación: el
+    # informe sale con las mismas etiquetas de percentiles que se estaban viendo.
+    show_percentile_labels: bool = True
     # Resolvedor de clases y librería: hacen falta para que los activos propios
     # salgan agrupados en su clase declarada y documentados como tales.
     resolver: object | None = None
@@ -271,20 +274,10 @@ def _cover(pdf: PdfPages, options: ReportOptions, scenario: Scenario,
                     fontweight="semibold")
     y -= 0.12
     _add_rule(figure, y)
+    # Sin frase de veredicto ("X sostiene el plan en el N%"): la portada no
+    # opina sobre qué estrategia gana. La probabilidad de éxito está en la tabla
+    # de supuestos resumen, junto a las demás cifras.
     y -= 0.07
-
-    best = max(result.strategies, key=lambda s: s.success_probability)
-    figure.text(
-        MARGIN, y,
-        f"{best.name} sostiene el plan en el {best.success_probability:.1%} de los caminos",
-        color=INK, fontsize=15, fontweight="semibold",
-    )
-    y -= 0.045
-    detalle = " · ".join(
-        f"{s.name}: {s.success_probability:.1%}" for s in result.strategies
-    )
-    figure.text(MARGIN, y, detalle, color=INK_SOFT, fontsize=9.5)
-    y -= 0.05
 
     if options.notes.strip():
         y -= 0.02
@@ -1385,7 +1378,10 @@ def build_report(
                 page = _chart_page(
                     pdf, options, page,
                     f"Distribución · {'moneda de hoy' if es_real else 'nominal'}",
-                    lambda canvas, r=es_real: draw_box_chart(canvas, result, years, r),
+                    lambda canvas, r=es_real: draw_box_chart(
+                        canvas, result, years, r,
+                        show_percentile_labels=options.show_percentile_labels,
+                    ),
                     _cite(
                         annex, kind,
                         "Percentiles calculados sobre los caminos simulados, sin "

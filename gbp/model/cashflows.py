@@ -102,11 +102,16 @@ class CashFlow:
     def schedule(self, horizon: int, inflation: float) -> np.ndarray:
         """Vector de longitud `horizon` con el flujo firmado de cada año.
 
-        El índice 0 corresponde al año 1. El monto se ingresa en **moneda de
-        hoy** (año 0) y se indexa desde el primer año proyectado, es decir con
-        factor `(1 + tasa)^year`. Esa es la convención de J.P. Morgan: para el
-        caso de la lámina 9 —1.1MM al año durante 29 años con inflación de
-        2.5%— reproduce exactamente el total de 47.2MM que reporta el PDF.
+        El índice 0 corresponde al año 1. El monto ingresado es **el del año 1**
+        y se indexa desde el año 2, con factor `(1 + tasa)^(year - 1)`: un
+        retiro de 1.000 con inflación de 5% vale 1.000 el año 1 y 1.050 el año
+        2. Un flujo que empieza más tarde también se expresa en pesos del año 1,
+        así que el año 5 ya llega con cuatro años de indexación.
+
+        J.P. Morgan indexa desde el año 1 (`(1 + tasa)^year`), y con esa
+        convención el caso de la lámina 9 reproducía su total de 47.2MM. Se
+        cambió a pedido de Ikalon, que ingresa el retiro del primer año tal
+        cual; con la nueva convención ese total da 46.0MM.
 
         Un flujo porcentual devuelve ceros: su monto no existe hasta que hay un
         patrimonio sobre el cual calcularlo. Se obtiene con `rate_schedule`.
@@ -117,7 +122,7 @@ class CashFlow:
         rate = (1.0 + (inflation if self.inflation_indexed else 0.0)) * (1.0 + self.growth) - 1.0
         last = min(self.end_year, horizon)
         for year in range(self.start_year, last + 1):
-            flows[year - 1] += self.sign * self.amount * (1.0 + rate) ** year
+            flows[year - 1] += self.sign * self.amount * (1.0 + rate) ** (year - 1)
         return flows
 
     def rate_schedule(self, horizon: int) -> np.ndarray:

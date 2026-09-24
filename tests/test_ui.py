@@ -261,7 +261,7 @@ def test_la_simulacion_completa_produce_resultados(window):
     assert len(result.strategies) == 3
     assert window.results.range_table.rowCount() > 0
     assert window.results.summary_table.rowCount() > 0
-    assert "%" in window.results.headline.text()
+    assert not hasattr(window.results, "headline")  # sin frase de veredicto
 
 
 def test_la_asignacion_se_muestra_sin_simular(window):

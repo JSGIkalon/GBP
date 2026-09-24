@@ -64,8 +64,8 @@ class CashflowPanel(QWidget):
 
         layout = QVBoxLayout(self)
         intro = QLabel(
-            "Los montos se ingresan en moneda de hoy. Si el flujo indexa inflación, crece "
-            "desde el primer año proyectado — la misma convención que usa J.P. Morgan. "
+            "Los montos se ingresan en moneda de hoy: es lo que se paga el año 1. Si el "
+            "flujo indexa inflación, crece desde el año 2. "
             "Con base '% patrimonio' el monto se calcula cada año sobre el patrimonio "
             "vigente: el retiro sube y baja con el mercado y el portafolio no se agota."
         )

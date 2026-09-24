@@ -31,8 +31,9 @@ documento cubre la arquitectura y las decisiones de ingeniería.
 | 10 | Informe con anexo de tablas, lámina de asignación de activos, retiro del stress test | **Completa** |
 
 | 16 | Instalador (Inno Setup) en vez de .exe portable | **Completa** |
+| 17 | Indexación desde el año 2, toggle de percentiles rápido y respetado en el PDF, sin frases de veredicto | **Completa** |
 
-**La aplicación está terminada y funcionando.** 184 tests en verde. Se entrega
+**La aplicación está terminada y funcionando.** 188 tests en verde. Se entrega
 como instalador, `dist\GBP-Setup-<versión>.exe` (57 MB), y `tools/packaging_check.py`
 congelado verifica los recursos embebidos, la persistencia en `%APPDATA%`, el
 motor, la interfaz y el informe PDF.
@@ -380,9 +381,11 @@ retiros indexados a inflación → control de LTV y liquidación forzada.
 
 ### Convenciones que valen la pena recordar
 
-- **Los flujos se ingresan en moneda de hoy** y se indexan desde el año 1, con factor
-  `(1 + inflación)^año`. Esa es la convención de J.P. Morgan: reproduce exactamente
-  el total de retiros de 47.2MM que reporta la lámina 9.
+- **El monto de un flujo es el del año 1** y se indexa desde el año 2, con factor
+  `(1 + inflación)^(año − 1)`. Es decisión de Ikalon (sesión 17). J.P. Morgan
+  indexa desde el año 1 —`(1 + inflación)^año`—, y con esa convención el caso de
+  la lámina 9 reproducía exactamente su total de retiros de 47.2MM. Ahora da
+  46.0MM.
 - **Un patrimonio agotado devenga a la tasa de caja**, no al retorno del portafolio:
   un saldo negativo es un descubierto, no una posición invertida.
 - **La amortización se calcula sobre el principal original** con una tasa de referencia
@@ -422,8 +425,11 @@ retiro de 1.1MM al año por 29 años, inflación 2.5%.
 | 25 | 134 / 134 | 39 / 37 | −2 / −6 |
 | 29 | 173 / 168 | 41 / 37 | −12 / −15 |
 
-El total de retiros coincide exactamente (47.2MM). La probabilidad de éxito da
-86.9% contra el 83.6% publicado.
+El total de retiros coincidía exactamente (47.2MM). La probabilidad de éxito
+daba 86.9% contra el 83.6% publicado. **Estas cifras son de antes de la sesión
+17**, cuando los flujos se indexaban desde el año 1 como hace J.P. Morgan.
+Desde que se indexan desde el año 2, el total de retiros baja a 46.0MM y la
+proyección queda algo más holgada que la publicada.
 
 El stress test que existió hasta la sesión 10 comparaba razonablemente contra la
 lámina 11, pero se retiró del producto: eran shocks definidos a mano, no
