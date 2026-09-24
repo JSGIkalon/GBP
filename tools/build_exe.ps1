@@ -65,13 +65,49 @@ $ErrorActionPreference = "Continue"
     --name GBP `
     --icon "$icon" `
     --add-data "$data;gbp/data" `
-    --paths . `
+    --paths "$((Get-Location).Path)" `
+    --specpath build `
     --exclude-module pytest `
+    --exclude-module pandas `
     --exclude-module PySide6.QtWebEngineCore `
     --exclude-module PySide6.Qt3DCore `
     --exclude-module PySide6.QtMultimedia `
+    --exclude-module PySide6.QtQuick `
+    --exclude-module PySide6.QtQml `
+    --exclude-module PySide6.QtNetwork `
+    --exclude-module PySide6.QtPdf `
+    --exclude-module PySide6.QtOpenGL `
+    --exclude-module PySide6.QtVirtualKeyboard `
+    --exclude-module PIL.AvifImagePlugin `
     --noconfirm `
     run.py
+
+# Lo que PyInstaller arrastra por los plugins de Qt aunque la app no lo use:
+# render OpenGL por software (casi 20 MB), QML/Quick, el visor de PDF de Qt,
+# red y TLS, y el teclado virtual. La app es solo widgets y matplotlib: el PDF
+# lo escribe matplotlib, no Qt. Si algo de esto resultara necesario, el smoke
+# test del final lo detecta antes de armar el instalador.
+$internal = "dist\GBP\_internal"
+$sobrantes = @(
+    "PySide6\opengl32sw.dll",
+    "PySide6\Qt6Quick.dll", "PySide6\Qt6Qml.dll", "PySide6\Qt6QmlModels.dll",
+    "PySide6\Qt6QmlMeta.dll", "PySide6\Qt6QmlWorkerScript.dll",
+    "PySide6\Qt6Pdf.dll", "PySide6\Qt6OpenGL.dll", "PySide6\Qt6VirtualKeyboard.dll",
+    "PySide6\Qt6Network.dll", "PySide6\QtNetwork.pyd",
+    "PySide6\plugins\imageformats\qpdf.dll",
+    "PySide6\plugins\platforminputcontexts",
+    "PySide6\plugins\networkinformation",
+    "PySide6\plugins\tls",
+    "libcrypto-3.dll", "libssl-3.dll",
+    "PIL\_avif.cp312-win_amd64.pyd"
+)
+foreach ($s in $sobrantes) {
+    $p = Join-Path $internal $s
+    if (Test-Path $p) { Remove-Item $p -Recurse -Force }
+}
+# Traducciones de Qt: la interfaz está en español con textos propios.
+Get-ChildItem "$internal\PySide6\translations" -Filter *.qm -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -notlike "qtbase_es*" } | Remove-Item -Force
 
 # No basta con que el archivo exista: si una copia del .exe sigue corriendo,
 # PyInstaller falla al sobrescribirlo y queda el ejecutable ANTERIOR en su
@@ -88,6 +124,18 @@ function Assert-Fresh($path) {
 }
 
 Assert-Fresh "dist\GBP\GBP.exe" | Out-Null
+
+Write-Host "Probando el ejecutable (ventana, simulacion y PDF)..."
+# Con datos propios en una carpeta temporal: no toca la sesion del usuario.
+$smoke = Join-Path $env:TEMP "gbp_build_smoke"
+Remove-Item $smoke -Recurse -Force -ErrorAction SilentlyContinue
+$proc = Start-Process "dist\GBP\GBP.exe" -ArgumentList "--smoke-test", "`"$smoke`"" -PassThru -Wait
+$log = Join-Path $smoke "smoke.log"
+if ($proc.ExitCode -ne 0 -or -not (Test-Path $log) -or (Get-Content $log -TotalCount 1) -ne "ok") {
+    if (Test-Path $log) { Get-Content $log | Write-Host }
+    throw "El ejecutable empaquetado no paso el smoke test (codigo $($proc.ExitCode))."
+}
+Write-Host "  $((Get-Content $log) -join ' | ')"
 
 Write-Host "Compilando el instalador..."
 & $iscc /Q "/DAppVersion=$version" "installer\GBP.iss"
