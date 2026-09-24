@@ -309,7 +309,7 @@ def _cover(pdf: PdfPages, options: ReportOptions, scenario: Scenario,
         x = MARGIN + i * ancho
         # Con cifras completas —y más en COP— el capital puede no caber en su
         # cuarto de página a 26 puntos: la letra se achica hasta que quepa.
-        ancho_pts = ancho * PAGE_SIZE[0] * 72 * 0.94
+        ancho_pts = ancho * PAGE_SIZE[0] * 72 * 0.86  # con aire hasta la siguiente
         fontsize = min(26.0, ancho_pts / (max(len(value), 1) * 0.6))
         figure.text(x, y, value, color=NAVY, fontsize=fontsize, fontweight="semibold",
                     va="top")
@@ -1374,7 +1374,7 @@ def _solver_page(pdf: PdfPages, options: ReportOptions, page_no: int, solve) -> 
         filas.append(["Nota", solve.message])
     return _table_pages(
         pdf, options, page_no, "Solver",
-        "Qué cifra del plan logra la probabilidad objetivo", ["", "Valor"], filas,
+        "Qué cifra del plan logra la probabilidad objetivo", ["Concepto", "Valor"], filas,
         footnote=(
             f"Búsqueda por bisección sobre los mismos {format_number(solve.n_paths)} caminos "
             "de mercado de la corrida: entre prueba y prueba solo cambia la cifra ajustada, "

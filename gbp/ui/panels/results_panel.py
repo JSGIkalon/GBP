@@ -311,9 +311,12 @@ class ResultsPanel(QTabWidget):
         self.goals_table.setColumnCount(len(columns))
         self.goals_table.setHorizontalHeaderLabels(columns)
         header = self.goals_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for i in range(1, len(columns)):
+        # Todas al ancho de su contenido y no «Meta» estirada: con varias
+        # estrategias la tabla no cabe, y una columna estirada se quedaba con
+        # todo el visor y empujaba las probabilidades fuera de la vista.
+        for i in range(len(columns)):
             header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        header.setStretchLastSection(True)
         rate = result.fx_rate
         rows = []
         for goal in self.goals:

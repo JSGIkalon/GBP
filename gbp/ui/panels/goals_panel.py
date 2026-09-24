@@ -61,6 +61,10 @@ class GoalsPanel(QWidget):
         header.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
         for col in range(1, len(COLUMNS)):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        # El combo de prioridad no tiene contenido que medir: sin ancho fijo
+        # quedaba cortado en «esencia…».
+        header.setSectionResizeMode(COL_PRIORITY, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(COL_PRIORITY, 120)
         self.table.setMaximumHeight(170)
         self.table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self.table)

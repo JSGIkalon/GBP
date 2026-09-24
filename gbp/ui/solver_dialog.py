@@ -30,12 +30,12 @@ from .worker import start_task
 class SolverDialog(QDialog):
     """Pregunta, búsqueda en un hilo y resultado, con «Aplicar al caso»."""
 
-    def __init__(self, window, parent=None):
-        super().__init__(parent or window)
-        self.window = window
+    def __init__(self, main, parent=None):
+        super().__init__(parent or main)
+        self.main = main
         self.setWindowTitle("Solver")
         self.setMinimumWidth(620)
-        self.result = None
+        self.solve_result = None
         self._thread = None
         self._worker = None
         self._request = None
@@ -52,28 +52,28 @@ class SolverDialog(QDialog):
         layout.addWidget(intro)
 
         form = QFormLayout()
-        self.strategy = QComboBox()
-        self.strategy.addItems([s.name for s in window.scenario.strategies])
-        self.strategy.currentIndexChanged.connect(self._fill_variables)
-        form.addRow("Estrategia", self.strategy)
+        self.strategy_box = QComboBox()
+        self.strategy_box.addItems([s.name for s in main.scenario.strategies])
+        self.strategy_box.currentIndexChanged.connect(self._fill_variables)
+        form.addRow("Estrategia", self.strategy_box)
 
-        self.variable = QComboBox()
-        form.addRow("Cifra a ajustar", self.variable)
+        self.variable_box = QComboBox()
+        form.addRow("Cifra a ajustar", self.variable_box)
 
-        self.metric = QComboBox()
-        self.metric.addItem("Probabilidad de éxito", Metric(SUCCESS))
-        horizon = window.scenario.horizon
-        for i, goal in enumerate(window.scenario.goals):
+        self.metric_box = QComboBox()
+        self.metric_box.addItem("Probabilidad de éxito", Metric(SUCCESS))
+        horizon = main.scenario.horizon
+        for i, goal in enumerate(main.scenario.goals):
             if goal.fits(horizon):
-                self.metric.addItem(f"Meta · {goal.describe(horizon)}", Metric(GOAL, i))
-        form.addRow("Probabilidad", self.metric)
+                self.metric_box.addItem(f"Meta · {goal.describe(horizon)}", Metric(GOAL, i))
+        form.addRow("Probabilidad", self.metric_box)
 
-        self.target = QDoubleSpinBox()
-        self.target.setRange(1.0, 99.0)
-        self.target.setDecimals(1)
-        self.target.setSuffix(" %")
-        self.target.setValue(85.0)
-        form.addRow("Objetivo: al menos", self.target)
+        self.target_box = QDoubleSpinBox()
+        self.target_box.setRange(1.0, 99.0)
+        self.target_box.setDecimals(1)
+        self.target_box.setSuffix(" %")
+        self.target_box.setValue(85.0)
+        form.addRow("Objetivo: al menos", self.target_box)
         layout.addLayout(form)
 
         self.progress = QProgressBar()
@@ -108,45 +108,45 @@ class SolverDialog(QDialog):
         self._fill_variables()
 
     def _current_strategy(self):
-        index = self.strategy.currentIndex()
-        strategies = self.window.scenario.strategies
+        index = self.strategy_box.currentIndex()
+        strategies = self.main.scenario.strategies
         return strategies[index] if 0 <= index < len(strategies) else None
 
     def _fill_variables(self, *_):
-        self.variable.clear()
+        self.variable_box.clear()
         strategy = self._current_strategy()
         if strategy is None:
             return
         for i, flow in enumerate(strategy.cashflows):
             tipo = "Retiro" if flow.kind is FlowKind.OUTFLOW else "Aporte"
             unidad = "% del patrimonio" if flow.is_percentage else "monto anual"
-            self.variable.addItem(f"{tipo} · {flow.name} ({unidad})", Variable(FLOW, i))
-        self.variable.addItem("Capital inicial", Variable(CAPITAL))
+            self.variable_box.addItem(f"{tipo} · {flow.name} ({unidad})", Variable(FLOW, i))
+        self.variable_box.addItem("Capital inicial", Variable(CAPITAL))
 
     def _money(self, value: float, is_pct: bool) -> str:
         """El valor en la moneda que se está viendo en la app."""
         if is_pct:
             return f"{value:.2%} del patrimonio"
-        rate = self.window.results.fx_rate or 1.0
-        suffix = " COP" if self.window.results.fx_rate else ""
+        rate = self.main.results.fx_rate or 1.0
+        suffix = " COP" if self.main.results.fx_rate else ""
         return f"{format_money(value * rate)}{suffix}"
 
     def _run(self):
         strategy = self._current_strategy()
         if strategy is None:
             return
-        self.window.settings_panel.commit()
-        scenario = deepcopy(self.window.scenario)
+        self.main.settings_panel.commit()
+        scenario = deepcopy(self.main.scenario)
         request = dict(
             scenario=scenario,
             strategy_name=strategy.name,
-            variable=self.variable.currentData(),
-            metric=self.metric.currentData(),
-            target=self.target.value() / 100.0,
+            variable=self.variable_box.currentData(),
+            metric=self.metric_box.currentData(),
+            target=self.target_box.value() / 100.0,
         )
         self._request = request
-        settings = deepcopy(self.window.settings)
-        cmas, correlations = self.window.cmas, self.window.correlations
+        settings = deepcopy(self.main.settings)
+        cmas, correlations = self.main.cmas, self.main.correlations
 
         self.run_button.setEnabled(False)
         self.apply_button.setEnabled(False)
@@ -169,10 +169,10 @@ class SolverDialog(QDialog):
     def _on_done(self, result):
         self.progress.setVisible(False)
         self.run_button.setEnabled(True)
-        self.result = result
+        self.solve_result = result
         # La ventana guarda el resultado con la firma del caso que se resolvió:
         # el informe solo lo incluye si el caso no cambió desde entonces.
-        self.window.remember_solve(result, self._request["scenario"])
+        self.main.remember_solve(result, self._request["scenario"])
         pct = result.is_percentage
         actual = (
             f"Hoy: {self._money(result.current_value, pct)} → "
@@ -197,23 +197,23 @@ class SolverDialog(QDialog):
 
     def _apply(self):
         """Escribe el valor en el caso vivo, como si se hubiera tecleado."""
-        if self.result is None or not self.result.found:
+        if self.solve_result is None or not self.solve_result.found:
             return
-        scenario = self.window.scenario
+        scenario = self.main.scenario
         strategy = next(
-            (s for s in scenario.strategies if s.name == self.result.strategy_name), None
+            (s for s in scenario.strategies if s.name == self.solve_result.strategy_name), None
         )
         if strategy is None:
             return
         variable = self._request["variable"]
         if variable.kind == CAPITAL:
-            strategy.initial_value = self.result.value
+            strategy.initial_value = self.solve_result.value
         elif variable.flow_index < len(strategy.cashflows):
-            strategy.cashflows[variable.flow_index].amount = self.result.value
-        self.window.after_external_edit()
+            strategy.cashflows[variable.flow_index].amount = self.solve_result.value
+        self.main.after_external_edit()
         # El caso ahora es el caso resuelto y aplicado: el informe puede seguir
         # citando el resultado del solver después de volver a correr.
-        self.window.remember_solve(self.result, scenario)
+        self.main.remember_solve(self.solve_result, scenario)
         self.apply_button.setEnabled(False)
         self.detail.setText(
             self.detail.text() + " Aplicado al caso: vuelve a correr la simulación para "
