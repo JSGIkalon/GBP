@@ -147,38 +147,24 @@ class LoanTerms:
         return fractions
 
 
-@dataclass
-class LoanLedger:
-    """Estado del crédito a lo largo de la simulación, camino a camino.
-
-    Todos los arreglos tienen forma `(n_paths,)` salvo los históricos, que son
-    `(n_paths, horizon)`.
-    """
-
-    balance: np.ndarray
-    interest_paid: np.ndarray
-    principal_paid: np.ndarray
-    balance_history: np.ndarray
-    margin_calls: np.ndarray
-    forced_sales: np.ndarray
-
-
 class LoanSimulator:
-    """Aplica las reglas del crédito año a año sobre un conjunto de caminos."""
+    """Aplica las reglas del crédito año a año sobre un conjunto de caminos.
+
+    Solo lleva el estado del año en curso (`balance`) y los acumulados que se
+    reportan. El histórico del saldo lo guarda el motor, que es quien lo usa.
+    """
 
     def __init__(self, terms: LoanTerms, n_paths: int, horizon: int, cash_return: float = 0.0):
         self.terms = terms
         self.horizon = horizon
         self.fractions = terms.amortization_fractions(cash_return)
         self.balance = np.zeros(n_paths, dtype=float)
-        self.balance_history = np.zeros((n_paths, horizon), dtype=float)
         self.margin_calls = np.zeros(n_paths, dtype=int)
         self.forced_sales = np.zeros(n_paths, dtype=float)
-        self.total_interest = np.zeros(n_paths, dtype=float)
 
     def drawdown(self, year: int) -> float:
         """Monto que ingresa al portafolio este año por desembolso del crédito."""
-        if self.terms.active and year == self.terms.start_year:
+        if year == self.terms.start_year:
             self.balance += self.terms.principal
             return self.terms.principal
         return 0.0
@@ -200,18 +186,18 @@ class LoanSimulator:
             return outflow
 
         interest = self.balance * path_rates
-        self.total_interest += interest
         if self.terms.interest_mode is InterestMode.CAPITALIZED:
             self.balance += interest
         else:
             outflow += interest
 
-        scheduled = self.terms.principal * self.fractions[offset]
-        principal = np.minimum(self.balance, scheduled)
         # En el vencimiento se cancela todo el saldo, incluidos los intereses
         # capitalizados que quedaron acumulados por encima del principal original.
         if offset == self.terms.term_years - 1:
             principal = self.balance.copy()
+        else:
+            scheduled = self.terms.principal * self.fractions[offset]
+            principal = np.minimum(self.balance, scheduled)
         self.balance -= principal
         outflow += principal
         return outflow
@@ -242,18 +228,9 @@ class LoanSimulator:
         sale = np.minimum(sale, np.minimum(assets, self.balance))
         self.balance -= sale
         self.forced_sales += sale
-        self.margin_calls += breach.astype(int)
+        # Se cuenta una llamada solo si hubo venta. Un camino ya agotado tiene
+        # LTV infinito y "rompe" el límite todos los años, pero no tiene nada
+        # que vender: contarlo inflaba las llamadas promedio con años en que no
+        # pasó nada.
+        self.margin_calls += (sale > 0).astype(int)
         return sale
-
-    def record(self, year: int) -> None:
-        self.balance_history[:, year - 1] = self.balance
-
-    def ledger(self) -> LoanLedger:
-        return LoanLedger(
-            balance=self.balance,
-            interest_paid=self.total_interest,
-            principal_paid=np.zeros_like(self.balance),
-            balance_history=self.balance_history,
-            margin_calls=self.margin_calls,
-            forced_sales=self.forced_sales,
-        )

@@ -11,12 +11,22 @@ from ..model.results import SimulationResult
 from ..model.scenario import Scenario, SimulationSettings
 
 
+class SimulationCancelled(Exception):
+    """La corrida se interrumpió a pedido, típicamente al cerrar la ventana."""
+
+
 class SimulationWorker(QObject):
-    """Corre la simulación y publica progreso, resultado o error."""
+    """Corre la simulación y publica progreso, resultado o error.
+
+    El worker recibe **copias** del caso y de la configuración, no los objetos
+    vivos de la ventana: si el usuario edita mientras corre, la corrida sigue
+    simulando lo que se le pidió y no una mezcla de antes y después.
+    """
 
     progress = Signal(int, int, str)
     finished = Signal(object)
     failed = Signal(str)
+    cancelled = Signal()
 
     def __init__(
         self,
@@ -30,6 +40,28 @@ class SimulationWorker(QObject):
         self.cmas = cmas
         self.correlations = correlations
         self.settings = settings
+        self._cancel = False
+        self._last_reported = (-1, "")
+
+    def cancel(self):
+        """Pide que la corrida se detenga en el próximo aviso de progreso.
+
+        Un QThread no se puede matar a mitad de un cálculo sin riesgo, así que
+        la cancelación es cooperativa: el motor avisa progreso una vez por año
+        simulado y ahí se comprueba la bandera.
+        """
+        self._cancel = True
+
+    def _on_progress(self, done: int, total: int, label: str):
+        if self._cancel:
+            raise SimulationCancelled()
+        # Un aviso por punto porcentual basta para la barra. Con muchas
+        # estrategias y horizontes largos, emitir cada año inunda el hilo de la
+        # interfaz de señales que no cambian nada visible.
+        step = (100 * done) // total if total else done
+        if (step, label) != self._last_reported:
+            self._last_reported = (step, label)
+            self.progress.emit(done, total, label)
 
     def run(self):
         try:
@@ -38,8 +70,10 @@ class SimulationWorker(QObject):
                 self.cmas,
                 self.correlations,
                 self.settings,
-                progress=lambda done, total, label: self.progress.emit(done, total, label),
+                progress=self._on_progress,
             )
+        except SimulationCancelled:
+            self.cancelled.emit()
         except ValueError as exc:
             # Errores de validación del escenario: son del usuario, no del programa.
             self.failed.emit(str(exc))
@@ -47,6 +81,11 @@ class SimulationWorker(QObject):
             self.failed.emit(f"La simulación falló: {exc}")
         else:
             self.finished.emit(result)
+        finally:
+            # El hilo se detiene a sí mismo, directo y no por señal: al cerrar,
+            # la ventana espera con `wait()` y tiene bloqueado el hilo principal,
+            # así que un `quit` encolado hacia allá no llegaría nunca.
+            QThread.currentThread().quit()
 
 
 def start_simulation(
@@ -68,9 +107,9 @@ def start_simulation(
     worker.progress.connect(on_progress)
     worker.finished.connect(on_finished)
     worker.failed.connect(on_failed)
-    worker.finished.connect(thread.quit)
-    worker.failed.connect(thread.quit)
     thread.finished.connect(worker.deleteLater)
+    # Sin esto queda un QThread huérfano, hijo de la ventana, por cada corrida.
+    thread.finished.connect(thread.deleteLater)
 
     thread.start()
     return thread, worker

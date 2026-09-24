@@ -47,6 +47,7 @@ deuda.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -57,40 +58,26 @@ from ..model.leverage import LoanSimulator, RateMode
 from ..model.results import SimulationResult, StrategyResult
 from ..model.scenario import Scenario, SimulationSettings
 from ..model.strategy import Strategy
-from .summary import CASH_ASSET, summarize
+from .summary import CASH_ASSET, risk_free_rate, summarize
 
 ProgressCallback = Callable[[int, int, str], None]
 
 
-def _flow_schedules(
-    flows: list[CashFlow], horizon: int, inflation: float
+def _split_by_kind(
+    flows: list[CashFlow], schedule_of: Callable[[CashFlow], np.ndarray], horizon: int
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Aportes y retiros por año, ambos como magnitudes positivas."""
-    inflows = np.zeros(horizon)
-    outflows = np.zeros(horizon)
-    for flow in flows:
-        schedule = flow.schedule(horizon, inflation)
-        if flow.kind is FlowKind.INFLOW:
-            inflows += schedule
-        else:
-            outflows += -schedule
-    return inflows, outflows
+    """Entradas y salidas por año, ambas como magnitudes positivas.
 
-
-def _rate_schedules(
-    flows: list[CashFlow], horizon: int
-) -> tuple[np.ndarray, np.ndarray]:
-    """Fracciones de entrada y de salida por año, ambas positivas.
-
-    `combined_rate_schedule` devuelve el neto, que es lo que necesita el motor.
-    El registro del anexo necesita las dos mitades por separado: un año con un
-    aporte del 3% y un retiro del 4% no es lo mismo que un año con un retiro
-    del 1%, aunque el patrimonio termine igual.
+    Sirve para los dos calendarios —montos fijos y fracciones del patrimonio—,
+    que se separan igual y solo difieren en cómo se calcula cada flujo. Las dos
+    mitades hacen falta por separado aunque el patrimonio solo vea el neto: un
+    año con un aporte del 3% y un retiro del 4% no es lo mismo, en el anexo,
+    que un año con un retiro del 1%.
     """
     inflows = np.zeros(horizon)
     outflows = np.zeros(horizon)
     for flow in flows:
-        schedule = flow.rate_schedule(horizon)
+        schedule = schedule_of(flow)
         if flow.kind is FlowKind.INFLOW:
             inflows += schedule
         else:
@@ -106,7 +93,14 @@ def _simulate_asset_returns(
     horizon: int,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Retornos brutos (1 + r) por camino, año y clase de activo."""
+    """Retornos brutos (1 + r) por camino, año y clase de activo.
+
+    Se calcula sobre un solo arreglo: el producto por el factor de Cholesky ya
+    crea uno nuevo, y a ese mismo se le suma la media y se le aplica la
+    exponencial. Con 1.000.000 de caminos cada copia intermedia son gigas, y la
+    versión anterior tenía cuatro vivas a la vez. El resultado es idéntico bit
+    a bit: son las mismas operaciones, sin copias entre ellas.
+    """
     assets = [cmas.by_name(n) for n in names]
     mu_log = np.array([a.mu_log for a in assets])
     sigma_log = np.array([a.sigma_log for a in assets])
@@ -115,8 +109,11 @@ def _simulate_asset_returns(
     factor = cholesky_factor(cov_log)
 
     shocks = rng.standard_normal((n_paths, horizon, len(names)))
-    log_returns = mu_log + shocks @ factor.T
-    return np.exp(log_returns)
+    returns = shocks @ factor.T
+    del shocks
+    returns += mu_log
+    np.exp(returns, out=returns)
+    return returns
 
 
 def _cash_growth(
@@ -131,53 +128,130 @@ def _cash_growth(
         return 1.0
 
 
-def _simulate_strategy(
+@dataclass
+class Market:
+    """Los caminos de mercado de una corrida, sorteados una sola vez.
+
+    Es lo que comparten todas las estrategias —y todas las pruebas del solver—:
+    que el mercado sea el mismo es lo que hace que las diferencias vengan de la
+    estrategia y no del azar.
+    """
+
+    names: list[str]
+    gross_returns: np.ndarray  # (n_paths, horizon, n_assets)
+    cash_growth: np.ndarray | float
+    corr: np.ndarray
+    cash_asset: str = CASH_ASSET
+
+
+def _market_names(scenario: Scenario, cmas: CMASet, correlations: CorrelationMatrix,
+                  cash_asset: str) -> list[str]:
+    names = scenario.asset_names
+    # La caja entra al sorteo aunque ninguna estrategia la use, porque de ella
+    # dependen la tasa del crédito y el devengo de un patrimonio agotado.
+    if cash_asset not in names and cash_asset in cmas.names and cash_asset in correlations.names:
+        names = names + [cash_asset]
+
+    # `subset` levantaría un KeyError, que es correcto como red de programador
+    # pero ilegible para quien abrió un caso de otra máquina. Aquí se convierte
+    # en un error de dominio que dice qué hacer.
+    missing = [n for n in names if n not in correlations.names]
+    if missing:
+        raise ValueError(
+            "La matriz de correlación no cubre estas clases de activo: "
+            + ", ".join(missing)
+            + ". Si el caso viene de otro computador, vuelve a abrirlo y acepta "
+            "añadir sus activos propios a tu librería."
+        )
+    return names
+
+
+def draw_market(
+    scenario: Scenario,
+    cmas: CMASet,
+    correlations: CorrelationMatrix,
+    settings: SimulationSettings,
+    cash_asset: str = CASH_ASSET,
+) -> Market:
+    """Sortea los caminos de mercado del escenario, validado de antemano."""
+    names = _market_names(scenario, cmas, correlations, cash_asset)
+    corr_full = correlations.subset(names)
+    rng = np.random.default_rng(settings.seed)
+    gross_returns = _simulate_asset_returns(
+        names, cmas, corr_full, settings.n_paths, scenario.horizon, rng
+    )
+    return Market(
+        names=names,
+        gross_returns=gross_returns,
+        cash_growth=_cash_growth(names, gross_returns, cmas, cash_asset),
+        corr=corr_full,
+        cash_asset=cash_asset,
+    )
+
+
+def simulate_strategy(
     strategy: Strategy,
     horizon: int,
     inflation: float,
     scenario_initial: float,
     cmas: CMASet,
-    names: list[str],
-    gross_returns: np.ndarray,
-    cash_growth: np.ndarray | float,
-    corr_full: np.ndarray,
-    cash_asset: str,
+    market: Market,
     on_year: Callable[[], None] | None = None,
 ) -> StrategyResult:
+    """Proyecta una estrategia sobre caminos de mercado ya sorteados.
+
+    Pública porque el solver la llama muchas veces sobre el mismo `market`,
+    cambiando solo una cifra de la estrategia.
+
+    Disposición de memoria
+    ----------------------
+    Dentro del bucle todo va **año por fila** —`(horizon, n_paths)`—, porque el
+    bucle recorre años y cada año toca todos los caminos: así cada lectura y
+    cada escritura es un bloque contiguo en memoria y no un salto de un camino
+    al siguiente. Medido: unas 3,6 veces más rápido que por columnas, con las
+    mismas cifras bit a bit. Al final se entrega la vista traspuesta, que es la
+    forma `(n_paths, horizon)` que espera el resto de la app.
+    """
     allocation = strategy.allocation
-    n_paths = gross_returns.shape[0]
+    names = market.names
+    n_paths = market.gross_returns.shape[0]
     weights = allocation.weight_vector(names)
     weights = weights / weights.sum()
 
-    portfolio_growth = gross_returns @ weights  # (n_paths, horizon)
-    cash_rate = np.asarray(cash_growth) - 1.0
+    portfolio_growth = np.ascontiguousarray((market.gross_returns @ weights).T)
+    cash_rate = np.asarray(market.cash_growth) - 1.0
+    if cash_rate.ndim == 2:
+        cash_rate = np.ascontiguousarray(cash_rate.T)
 
-    inflows, outflows = _flow_schedules(strategy.cashflows, horizon, inflation)
+    inflows, outflows = _split_by_kind(
+        strategy.cashflows, lambda f: f.schedule(horizon, inflation), horizon
+    )
     flow_rates = combined_rate_schedule(strategy.cashflows, horizon)
     # Las dos mitades del flujo porcentual por separado, solo para el registro:
     # sobre una base que se fija antes de aplicar nada, aplicarlas juntas o por
     # separado da el mismo patrimonio, pero el anexo necesita saber cuánto
     # entró y cuánto salió, no solo el neto.
-    rate_in, rate_out = _rate_schedules(strategy.cashflows, horizon)
+    rate_in, rate_out = _split_by_kind(
+        strategy.cashflows, lambda f: f.rate_schedule(horizon), horizon
+    )
+    # Sin flujos porcentuales los aportes y retiros son los mismos en todos los
+    # caminos: basta una fila, y no una matriz de caminos repetidos.
+    per_path_flows = bool(rate_in.any() or rate_out.any())
+    flow_rows = n_paths if per_path_flows else 1
 
     loan = strategy.loan
-    reference_cash = 0.0
-    try:
-        reference_cash = cmas.by_name(cash_asset).compound_return
-    except KeyError:
-        pass
     ledger = (
-        LoanSimulator(loan, n_paths, horizon, reference_cash)
+        LoanSimulator(loan, n_paths, horizon, risk_free_rate(cmas, market.cash_asset))
         if loan is not None and loan.active
         else None
     )
 
     initial_value = float(strategy.resolved_initial(scenario_initial))
     assets = np.full(n_paths, initial_value)
-    assets_history = np.zeros((n_paths, horizon))
-    debt_history = np.zeros((n_paths, horizon))
-    contributions = np.zeros((n_paths, horizon))
-    withdrawals = np.zeros((n_paths, horizon))
+    assets_history = np.zeros((horizon, n_paths))
+    debt_history = np.zeros((horizon, n_paths)) if ledger is not None else None
+    contributions = np.zeros((horizon, flow_rows))
+    withdrawals = np.zeros((horizon, flow_rows))
 
     for year in range(1, horizon + 1):
         y = year - 1
@@ -186,9 +260,9 @@ def _simulate_strategy(
             assets += ledger.drawdown(year)
 
         assets += inflows[y]
-        contributions[:, y] = inflows[y]
+        contributions[y] = inflows[y]
 
-        growth = np.where(assets > 0, portfolio_growth[:, y], _year_cash(cash_rate, y) + 1.0)
+        growth = np.where(assets > 0, portfolio_growth[y], _year_cash(cash_rate, y) + 1.0)
         assets = assets * growth
 
         if ledger is not None:
@@ -199,11 +273,11 @@ def _simulate_strategy(
             net_wealth = assets - ledger.balance if ledger is not None else assets
             base = np.maximum(net_wealth, 0.0)
             assets += base * flow_rates[y]
-            contributions[:, y] += base * rate_in[y]
-            withdrawals[:, y] += base * rate_out[y]
+            contributions[y] += base * rate_in[y]
+            withdrawals[y] += base * rate_out[y]
 
         assets -= outflows[y]
-        withdrawals[:, y] += outflows[y]
+        withdrawals[y] += outflows[y]
 
         if ledger is not None:
             # La liquidación forzada **sale del portafolio**: se venden activos y
@@ -214,41 +288,47 @@ def _simulate_strategy(
             # —imposible— y los años siguientes capitalizaban sobre un
             # portafolio que ya se había vendido.
             assets -= ledger.margin_call(np.maximum(assets, 0.0))
-            ledger.record(year)
-            debt_history[:, y] = ledger.balance
+            debt_history[y] = ledger.balance
 
-        assets_history[:, y] = assets
+        assets_history[y] = assets
 
         if on_year is not None:
             on_year()
 
-    corr_subset = corr_full[np.ix_(
-        [names.index(n) for n in allocation.asset_names],
-        [names.index(n) for n in allocation.asset_names],
-    )]
-    summary = summarize(allocation, cmas, corr_subset, cash_asset)
+    idx = [names.index(n) for n in allocation.asset_names]
+    summary = summarize(allocation, cmas, market.corr[np.ix_(idx, idx)], market.cash_asset)
 
     inflation_factors = (1.0 + inflation) ** np.arange(1, horizon + 1)
 
+    # Sin crédito la deuda es cero en todas partes y el patrimonio neto es el
+    # activo tal cual: se comparte el arreglo en vez de guardar una resta por
+    # cero y una matriz de ceros del tamaño de la corrida.
+    if debt_history is None:
+        debt = np.zeros((1, horizon))
+        wealth = assets_history.T
+    else:
+        debt = debt_history.T
+        wealth = (assets_history - debt_history).T
+
     return StrategyResult(
         name=allocation.name,
-        wealth=assets_history - debt_history,
-        assets=assets_history,
-        debt=debt_history,
+        wealth=wealth,
+        assets=assets_history.T,
+        debt=debt,
         summary=summary,
         margin_calls=ledger.margin_calls if ledger else np.zeros(n_paths, dtype=int),
         forced_sales=ledger.forced_sales if ledger else np.zeros(n_paths),
         inflation_factors=inflation_factors,
-        contributions=contributions,
-        withdrawals=withdrawals,
+        contributions=contributions.T,
+        withdrawals=withdrawals.T,
         initial_value=initial_value,
     )
 
 
 def _year_cash(cash_rate: np.ndarray | float, year_index: int) -> np.ndarray | float:
-    """Tasa de caja del año, sea una constante o una matriz por camino."""
+    """Tasa de caja del año, sea una constante o una matriz año por camino."""
     if np.ndim(cash_rate) == 2:
-        return cash_rate[:, year_index]
+        return cash_rate[year_index]
     return cash_rate
 
 
@@ -272,27 +352,7 @@ def simulate(
     """Corre la simulación para todas las estrategias del escenario."""
     settings = settings or SimulationSettings()
     scenario.validate(cmas)
-
-    names = scenario.asset_names
-    # La caja entra al sorteo aunque ninguna estrategia la use, porque de ella
-    # dependen la tasa del crédito y el devengo de un patrimonio agotado.
-    if cash_asset not in names and cash_asset in cmas.names and cash_asset in correlations.names:
-        names = names + [cash_asset]
-
-    # `subset` levantaría un KeyError, que es correcto como red de programador
-    # pero ilegible para quien abrió un caso de otra máquina. Aquí se convierte
-    # en un error de dominio que dice qué hacer.
-    missing = [n for n in names if n not in correlations.names]
-    if missing:
-        raise ValueError(
-            "La matriz de correlación no cubre estas clases de activo: "
-            + ", ".join(missing)
-            + ". Si el caso viene de otro computador, vuelve a abrirlo y acepta "
-            "añadir sus activos propios a tu librería."
-        )
-
-    corr_full = correlations.subset(names)
-    rng = np.random.default_rng(settings.seed)
+    _market_names(scenario, cmas, correlations, cash_asset)  # falla antes de sortear
 
     # El progreso se cuenta en pasos de **año simulado**, no de estrategia: con
     # una sola estrategia la barra saltaba de 0 a 100 sin pasar por el medio.
@@ -305,10 +365,7 @@ def simulate(
     if progress:
         progress(done, total, f"Sorteando {settings.n_paths:,} caminos de mercado…")
 
-    gross_returns = _simulate_asset_returns(
-        names, cmas, corr_full, settings.n_paths, scenario.horizon, rng
-    )
-    cash_growth = _cash_growth(names, gross_returns, cmas, cash_asset)
+    market = draw_market(scenario, cmas, correlations, settings, cash_asset)
     done = 1
 
     results = []
@@ -324,17 +381,13 @@ def simulate(
                 progress(done, total, _label)
 
         results.append(
-            _simulate_strategy(
+            simulate_strategy(
                 strategy,
                 scenario.horizon,
                 scenario.inflation,
                 scenario.initial_value,
                 cmas,
-                names,
-                gross_returns,
-                cash_growth,
-                corr_full,
-                cash_asset,
+                market,
                 on_year=tick if progress else None,
             )
         )

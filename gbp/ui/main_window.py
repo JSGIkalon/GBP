@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, QUrl
@@ -29,6 +30,7 @@ from ..io.caseio import (
     from_dict,
     read_case,
     save_case,
+    to_dict,
 )
 from ..io.report import build_report
 from ..model.correlation import CorrelationMatrix
@@ -78,6 +80,11 @@ class MainWindow(QMainWindow):
         self.current_path: Path | None = restored_path
         self._thread = None
         self._worker = None
+        # El caso **tal como se simuló**. Los resultados en pantalla y el PDF se
+        # explican con esta copia, no con el caso vivo, que el usuario puede
+        # haber seguido editando después de correr.
+        self._run_scenario = None
+        self._pending_scenario = None
 
         self._session_timer = QTimer(self)
         self._session_timer.setSingleShot(True)
@@ -89,6 +96,13 @@ class MainWindow(QMainWindow):
         if self._restored_session:
             nombre = self.current_path.name if self.current_path else self.scenario.name
             self.status.setText(f"Se restauró la sesión anterior: {nombre}")
+        if library.LOAD_WARNINGS:
+            QTimer.singleShot(
+                0,
+                lambda: QMessageBox.warning(
+                    self, "Librería de supuestos", "\n\n".join(library.LOAD_WARNINGS)
+                ),
+            )
 
     # ------------------------------------------------------------------
     @property
@@ -286,8 +300,26 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def _on_scenario_changed(self):
+        self.strategies_panel.capital_panel.refresh_inherited()
         self._refresh_dependent_views()
         self._schedule_session_save()
+        self._flag_stale_results()
+
+    def results_are_stale(self) -> bool:
+        """Si el caso cambió desde la corrida que se está mostrando."""
+        if self._run_scenario is None:
+            return False
+        return to_dict(self.scenario)["scenario"] != to_dict(self._run_scenario)["scenario"]
+
+    def _flag_stale_results(self):
+        # Con una corrida en curso la barra de estado es del progreso.
+        if self.results.result is None or not self.run_button.isEnabled():
+            return
+        if self.results_are_stale():
+            self.status.setText(
+                "El caso cambió: los resultados son de la corrida anterior. "
+                "Vuelve a correr la simulación para actualizarlos."
+            )
 
     def _schedule_session_save(self):
         """Guarda la sesión poco después del último cambio.
@@ -327,8 +359,11 @@ class MainWindow(QMainWindow):
 
     def _on_settings_changed(self):
         if self.results.result is not None:
+            # El horizonte es el de la corrida, no el del caso vivo: si se
+            # alargó después de simular, los hitos nuevos caerían fuera de las
+            # matrices de resultado.
             self.results.show_result(
-                self.results.result, self.settings, self.scenario.horizon
+                self.results.result, self.settings, self.results.result.horizon
             )
 
     def _refresh_dependent_views(self):
@@ -350,6 +385,7 @@ class MainWindow(QMainWindow):
             self.scenario, self.cmas, self.available_assets, self.resolver
         )
         self.results.clear()
+        self._run_scenario = None
         self.export_action.setEnabled(False)  # el informe siempre describe una corrida
         self._refresh_dependent_views()
         self._schedule_session_save()
@@ -469,16 +505,24 @@ class MainWindow(QMainWindow):
         self.progress.setRange(0, 0)  # indeterminado hasta el primer aviso
         self.status.setText(f"Corriendo {self.settings.n_paths:,} simulaciones…")
 
+        self._pending_scenario = deepcopy(self.scenario)
         self._thread, self._worker = start_simulation(
             self,
-            self.scenario,
+            self._pending_scenario,
             self.cmas,
             self.correlations,
-            self.settings,
+            deepcopy(self.settings),
             self._on_progress,
             self._on_finished,
             self._on_failed,
         )
+        self._thread.finished.connect(self._on_thread_finished)
+
+    def _on_thread_finished(self):
+        # El hilo se autodestruye al terminar: soltar la referencia aquí y no
+        # antes, o `isRunning()` se llamaría sobre un objeto ya borrado.
+        self._thread = None
+        self._worker = None
 
     def _on_progress(self, done: int, total: int, label: str):
         if total:
@@ -487,12 +531,13 @@ class MainWindow(QMainWindow):
         self.status.setText(label)
 
     def _on_finished(self, result):
-        self.results.show_result(result, self.settings, self.scenario.horizon)
+        self._run_scenario = self._pending_scenario
+        self.results.show_result(result, self.settings, result.horizon)
         self.run_button.setEnabled(True)
         self.export_action.setEnabled(True)
         self.progress.setVisible(False)
         self.status.setText("Simulación terminada.")
-        self._thread = None
+        self._flag_stale_results()  # por si se editó el caso mientras corría
 
     def _on_failed(self, message: str):
         self.run_button.setEnabled(True)
@@ -500,7 +545,6 @@ class MainWindow(QMainWindow):
         self.progress.setVisible(False)
         self.status.setText("La simulación no se completó.")
         QMessageBox.warning(self, "No se pudo simular", message)
-        self._thread = None
 
     # ------------------------------------------------------------------
     def export_report(self):
@@ -515,8 +559,24 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # El informe describe **la corrida**: sus supuestos, sus flujos y sus
+        # cifras vienen de la copia simulada. Mezclar el caso vivo con un
+        # resultado viejo imprimiría supuestos que no generaron esas cifras.
+        scenario = self._run_scenario or self.scenario
+        if self.results_are_stale() and QMessageBox.question(
+            self,
+            "El caso cambió",
+            "El caso se editó después de la última corrida. El informe va a "
+            "describir la corrida anterior, no los cambios nuevos.\n\n"
+            "¿Exportar igual? Para incluir los cambios, cancela y vuelve a correr "
+            "la simulación.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+
         has_debt = any(s.debt.max() > 0 for s in result.strategies)
-        dialog = ExportDialog(self.scenario.name, has_debt, self)
+        dialog = ExportDialog(scenario.name, has_debt, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -524,7 +584,7 @@ class MainWindow(QMainWindow):
         options.resolver = self.resolver
         options.cmas = self.cmas
         options.show_percentile_labels = self.results.show_percentile_labels
-        suggested = f"{options.title} — {self.scenario.name}.pdf".replace("/", "-")
+        suggested = f"{options.title} — {scenario.name}.pdf".replace("/", "-")
         path, _ = QFileDialog.getSaveFileName(
             self, "Guardar informe", suggested, "Documentos PDF (*.pdf)"
         )
@@ -535,9 +595,7 @@ class MainWindow(QMainWindow):
 
         dialog.remember()
         try:
-            written = build_report(
-                path, options, self.scenario, result, self.settings
-            )
+            written = build_report(path, options, scenario, result, self.settings)
         except (OSError, ValueError) as exc:
             QMessageBox.critical(self, "No se pudo exportar", str(exc))
             return
@@ -567,15 +625,24 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if self._thread is not None and self._thread.isRunning():
-            self._thread.quit()
-            self._thread.wait(3000)
-        library.save_cmas(self.cmas)
-        library.save_settings(self.settings)
-        # El caso en curso se guarda siempre, se haya guardado a archivo o no.
-        # No reemplaza a «Guardar caso»: es la red para no perder lo cargado si
-        # la app se cierra antes. Se cancela el guardado con retardo pendiente y
-        # se escribe ya, para no depender de un temporizador que quizá no llegue
-        # a dispararse.
+            # `quit()` no detiene un cálculo en curso, y destruir un QThread vivo
+            # tumba la app. Se pide cancelar —el motor lo ve en su siguiente
+            # aviso de progreso, a lo sumo un año simulado después— y se espera.
+            if self._worker is not None:
+                self._worker.cancel()
+            self._thread.wait()
+        # El caso en curso se guarda siempre, se haya guardado a archivo o no, y
+        # **primero**: es lo que más duele perder. No reemplaza a «Guardar
+        # caso»: es la red para no perder lo cargado si la app se cierra antes.
+        # Se cancela el guardado con retardo pendiente y se escribe ya, para no
+        # depender de un temporizador que quizá no llegue a dispararse.
         self._session_timer.stop()
         self._save_session_now()
+        # Cada guardado por separado: que OneDrive tenga bloqueada la librería
+        # no debe impedir guardar la configuración, ni cerrar la app.
+        for save, payload in ((library.save_cmas, self.cmas), (library.save_settings, self.settings)):
+            try:
+                save(payload)
+            except OSError:
+                pass
         super().closeEvent(event)

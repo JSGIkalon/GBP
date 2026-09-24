@@ -40,8 +40,13 @@ class SimulationSettings:
         Se respeta exactamente lo configurado: no se añade el horizonte por
         cuenta propia. Menos ventanas de tiempo dejan el gráfico legible, y si
         se quiere el año final basta con agregarlo en Configuración.
+
+        La excepción es un horizonte más corto que todos los hitos (un caso a 3
+        años con hitos 5, 10, 15, 20): sin ningún hito el gráfico quedaba vacío
+        y el informe salía con tablas sin filas. Ahí se muestra el año final.
         """
-        return sorted({y for y in self.milestone_years if 1 <= y <= horizon})
+        years = sorted({y for y in self.milestone_years if 1 <= y <= horizon})
+        return years or [horizon]
 
 
 @dataclass
@@ -85,11 +90,29 @@ class Scenario:
                 )
 
             initial = strategy.resolved_initial(self.initial_value)
-            if initial <= 0 and not any(f.sign > 0 for f in strategy.cashflows):
-                raise ValueError(
-                    f"La estrategia '{strategy.name}' no tiene capital inicial ni aportes: "
-                    "no hay nada que proyectar."
-                )
+            if initial <= 0:
+                # Sin capital solo cuentan los aportes de monto fijo: un aporte
+                # porcentual sobre un patrimonio de cero es cero para siempre.
+                # Y tienen que empezar el año 1, porque un año con patrimonio en
+                # cero cuenta como agotado y el caso saldría con 0% de éxito sin
+                # que nada lo explique.
+                aportes = [
+                    f for f in strategy.cashflows if f.sign > 0 and not f.is_percentage
+                ]
+                if not aportes:
+                    raise ValueError(
+                        f"La estrategia '{strategy.name}' no tiene capital inicial ni "
+                        "aportes de monto fijo: no hay nada que proyectar. Un aporte "
+                        "porcentual sobre un patrimonio de cero no aporta nada."
+                    )
+                if min(f.start_year for f in aportes) > 1:
+                    raise ValueError(
+                        f"La estrategia '{strategy.name}' no tiene capital inicial y su "
+                        f"primer aporte llega en el año {min(f.start_year for f in aportes)}. "
+                        "Los años previos quedarían con patrimonio cero, que cuenta como "
+                        "agotado. Dale un capital inicial o haz que un aporte empiece "
+                        "el año 1."
+                    )
 
             if strategy.has_loan and strategy.loan.start_year > self.horizon:
                 raise ValueError(

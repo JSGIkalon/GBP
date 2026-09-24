@@ -108,7 +108,7 @@ def compute(n_paths: int = 3000) -> dict:
         for s in result.strategies:
             strategies[s.name] = {
                 "wealth": _digest(s.wealth),
-                "debt": _digest(s.debt),
+                "debt": _digest(np.broadcast_to(s.debt, s.wealth.shape)),
                 "contributions": _digest(np.broadcast_to(s.contributions, s.wealth.shape)),
                 "withdrawals": _digest(np.broadcast_to(s.withdrawals, s.wealth.shape)),
                 "forced_sales": _digest(s.forced_sales),

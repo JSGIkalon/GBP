@@ -73,7 +73,8 @@ class StrategyResult:
         script de control para comparar contra los p5 y p95 publicados por
         J.P. Morgan.
         """
-        years = years or list(range(1, self.horizon + 1))
+        if years is None:
+            years = list(range(1, self.horizon + 1))
         idx = [y - 1 for y in years]
         data = self.values(real)[:, idx]
         wanted = percentiles if percentiles is not None else PERCENTILES
@@ -128,8 +129,9 @@ class StrategyResult:
         if self.horizon >= 2:
             previous = values[:, -2]
         else:
-            factor = self.inflation_factors[0] if (real and self.inflation_factors.size) else 1.0
-            previous = np.full(self.n_paths, self.initial_value / factor)
+            # Con un solo año, el punto de partida es el capital del año 0, que
+            # ya está en moneda de hoy: no se deflacta.
+            previous = np.full(self.n_paths, self.initial_value)
         alive = previous > 0
         if not alive.any():
             return float("nan")

@@ -88,10 +88,21 @@ class CapitalPanel(QWidget):
         self.amount.setValue(own if own is not None else scenario.initial_value)
         self.amount.setEnabled(own is not None)
         self._loading = False
+        self.refresh_inherited()
 
+    def refresh_inherited(self):
+        """Vuelve a leer el capital del escenario, que se edita en otro panel.
+
+        Sin esto la etiqueta mostraba el capital que había al cargar el caso,
+        aunque después se cambiara en la pestaña Escenario.
+        """
         self.inherited.setText(
-            f"Capital del escenario: {format_money(scenario.initial_value)}"
+            f"Capital del escenario: {format_money(self.scenario.initial_value)}"
         )
+        if self.strategy is not None and self.strategy.initial_value is None:
+            self._loading = True
+            self.amount.setValue(self.scenario.initial_value)
+            self._loading = False
 
     def _on_change(self, *_):
         if self._loading or self.strategy is None:

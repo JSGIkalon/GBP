@@ -26,7 +26,8 @@ from ..model.scenario import SimulationSettings
 APP_DIR_NAME = Path("Ikalon") / "GBP"
 LIBRARY_FILE = "cma_library.json"
 SETTINGS_FILE = "settings.json"
-SCHEMA_VERSION = 2
+# Esquema del archivo de configuración (settings.json), no de la librería.
+SETTINGS_SCHEMA_VERSION = 2
 # La librería pasó a 3 al aparecer los activos propios: cada clase declara su
 # origen y, si es propia, su clase de activo. Un archivo de esquema 2 se lee sin
 # migración porque todo lo que no dice su origen es del LTCMA, que es lo que era.
@@ -37,6 +38,11 @@ LIBRARY_SCHEMA_VERSION = 3
 # valor por defecto, más corto, en vez de dejarlo con la lista vieja para
 # siempre. Si los editó, se respetan.
 LEGACY_MILESTONES = [5, 10, 15, 20, 25, 30]
+
+# Avisos de la última carga, para que la ventana los muestre al abrir. Una
+# función de carga que devuelve la librería no tiene otra forma de contar que
+# tuvo que reemplazar un archivo dañado.
+LOAD_WARNINGS: list[str] = []
 
 
 def app_data_dir() -> Path:
@@ -84,8 +90,28 @@ def load_cmas() -> CMASet:
         save_cmas(cmas)
         return cmas
 
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return CMASet([asset_from_dict(entry) for entry in payload.get("assets", [])])
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return CMASet([asset_from_dict(entry) for entry in payload.get("assets", [])])
+    except (ValueError, TypeError, KeyError, AttributeError):
+        # Una librería ilegible no puede impedir abrir la app. Tampoco se pisa:
+        # puede traer activos propios que el analista querrá rescatar, así que
+        # se aparta con otro nombre antes de sembrar una nueva desde el LTCMA.
+        backup = path.with_name(path.stem + ".ilegible" + path.suffix)
+        try:
+            path.replace(backup)
+        except OSError:
+            pass
+        LOAD_WARNINGS.append(
+            f"La librería de supuestos estaba dañada y se reemplazó por la del LTCMA. "
+            f"La copia original quedó en {backup}."
+        )
+        cmas = seed_cmas()
+        try:
+            save_cmas(cmas)
+        except OSError:
+            pass
+        return cmas
 
 
 def asset_from_dict(entry: dict) -> AssetClass:
@@ -203,9 +229,11 @@ def load_settings() -> SimulationSettings:
     path = settings_path()
     if not path.exists():
         return SimulationSettings()
-    payload = json.loads(path.read_text(encoding="utf-8"))
     defaults = SimulationSettings()
     try:
+        # El parseo va dentro: un JSON roto es un `ValueError` y tiene que caer
+        # en la misma red que un valor fuera de rango.
+        payload = json.loads(path.read_text(encoding="utf-8"))
         milestones = list(payload.get("milestone_years", defaults.milestone_years))
         if payload.get("schema", 1) < 2 and milestones == LEGACY_MILESTONES:
             milestones = list(defaults.milestone_years)
@@ -215,14 +243,14 @@ def load_settings() -> SimulationSettings:
             seed=defaults.seed,
             milestone_years=milestones,
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, AttributeError, OSError):
         # Un archivo corrupto no debería impedir abrir la app.
         return defaults
 
 
 def save_settings(settings: SimulationSettings) -> Path:
     path = settings_path()
-    _write_atomic(path, {"schema": SCHEMA_VERSION, **asdict(settings)})
+    _write_atomic(path, {"schema": SETTINGS_SCHEMA_VERSION, **asdict(settings)})
     return path
 
 
