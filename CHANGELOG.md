@@ -416,6 +416,97 @@ Activos propios: la app deja de servir solo para patrimonios en EE.UU.
   camino es dejar elegir un activo de referencia concreto — la regla está
   aislada en `extend_correlations`, así que no obliga a rehacer nada.
 
+## Sesión 18 — 23 sep 2026
+
+Metas, solver y vista en COP, las tres opcionales; cifras completas; auditoría
+de código y de tests; MODELO.md reescrito. Versión 0.2.0.
+
+**Hecho**
+
+- **Metas con probabilidad propia** (`model/goals.py`, sección opcional en
+  Escenario). Patrimonio mínimo en un año o al final, en moneda de hoy o
+  nominal. Se cumple si el patrimonio de ese año alcanza el monto sin haberse
+  agotado antes. No cambian la simulación. La pestaña «Metas» y su lámina solo
+  aparecen si hay metas.
+- **Solver** (`engine/solver.py`, Análisis → Solver…, Ctrl+R). Encuentra el
+  retiro máximo, o el aporte o capital mínimo, que logra una probabilidad
+  objetivo de éxito o de una meta. Busca por bisección sobre los mismos caminos
+  de mercado, sin tocar el caso; «Aplicar al caso» escribe el valor. En el
+  ejemplo, el retiro al 85% sale en 14 pruebas y unos 0,3 s. Tiene lámina
+  opcional en el PDF, solo si el caso no cambió desde que se resolvió.
+- **Vista en COP**: tasa USD/COP fija y opcional en Escenario, y casilla «Ver en
+  COP». Multiplica toda cifra en dinero en la app y en el PDF; las
+  probabilidades no cambian.
+- **Cifras completas con punto de miles** (25.000.000) en tablas, ejes,
+  etiquetas, tooltips y campos de monto. Antes se abreviaban a «25.0MM». En el
+  box plot, la mediana se achica o va vertical si no cabe en su caja.
+- **Esquema de caso 5**: metas y tasa. Un caso de esquema 4 abre igual y simula
+  idéntico.
+- **Bugs de la auditoría**:
+  - La corrida simula una copia del caso: editar mientras corre ya no mezcla
+    entradas.
+  - El PDF describe la corrida y avisa si el caso cambió desde entonces.
+  - Se usa el horizonte de la corrida: subir el horizonte después de simular ya
+    no rompe los hitos.
+  - Cerrar la ventana en mitad de una corrida la cancela limpio, en vez de
+    destruir un hilo vivo.
+  - Cada guardado del cierre va por separado, con la sesión primero.
+  - El capital heredado se refresca.
+  - Un caso sin capital y con aportes solo porcentuales, o que empiezan después
+    del año 1, se rechaza con explicación.
+  - Con horizonte menor a los hitos se muestra el año final.
+  - Una librería dañada se aparta como `.ilegible` y no impide abrir la app.
+- **Dos correcciones que sí mueven una cifra**:
+  - Las **llamadas a margen** se cuentan solo si hubo venta: un camino agotado
+    «rompía» el LTV cada año sin vender nada. En el caso apalancado de la
+    huella, las llamadas promedio de un crédito pasan de 0,047 a 0,045.
+  - El **cambio del último año en moneda de hoy** con horizonte 1 ya no
+    deflacta el capital del año 0.
+- **Rendimiento, con cifras idénticas bit a bit**:
+  - Retornos sin copias intermedias.
+  - Bucle anual en disposición `(años, caminos)`, unas 3,6 veces más rápido.
+  - Sin matrices de deuda ni de flujos redundantes.
+  - Caché de estadísticas en `StrategyResult`, compartida por el gráfico, su
+    tabla y el informe.
+  - CVaR por partición.
+  - Interfaz: refresco agrupado a 200 ms, correlaciones y asignación solo si
+    cambian, Ajustes al terminar de editar, hover por *blitting*, y el PDF y el
+    solver en hilos.
+- **`tools/fingerprint.py` y `tests/data/fingerprint.json`**: huella SHA-256 del
+  motor sobre tres casos. Si cambia un bit, el test falla.
+- **Instalador de 57 a 35 MB**: fuera pandas (no se usaba), QML/Quick, el visor
+  PDF de Qt, red/TLS, OpenGL por software y las traducciones.
+  `GBP.exe --smoke-test` prueba el ejecutable (ventana, simulación y PDF) antes
+  de armar el instalador.
+- **Suite de tests depurada**: de 171 a 101 funciones, más 9 nuevas en
+  `test_mejoras.py`. Salieron los redundantes y los que solo miraban textos o
+  maquetación. `pytest.ini` limita la búsqueda a `tests/`. 139 casos en verde en
+  unos 20 s (antes 188 en 33 s).
+- **MODELO.md reescrito** como manual matemático y de construcción, con
+  ejemplos resueltos y figuras generadas con el motor real
+  (`tools/make_modelo_figures.py` → `docs/img/`).
+- Código muerto fuera. Colores del tema en vez de literales.
+  `SETTINGS_SCHEMA_VERSION` en vez del ambiguo `SCHEMA_VERSION` de la librería.
+
+**Decisiones y hallazgos**
+
+- **La vista COP es una tasa fija, no un modelo de la moneda**, a pedido de
+  Ikalon: modelar la devaluación queda fuera.
+- **Metas y tasa son del caso vivo, no de la corrida**: no entran a la
+  simulación, así que cambiarlas no deja los resultados desactualizados ni pide
+  volver a correr.
+- **Qt tiene métodos que un atributo Python puede pisar sin avisar.**
+  `QDialog.metric` es virtual y la ventana del solver lo tapaba con un combo: la
+  captura fallaba dentro de Qt. También se evitaron `window` y `result`. Queda
+  como tercera trampa de Qt, junto a las dos de PROJECT.md.
+- **Con cifras completas, las tablas de flujos ya no caben lado a lado** y el
+  informe cae a una hoja por estrategia, como ya preveía `_topic_page`. El
+  informe del ejemplo tiene más páginas.
+- **La huella del motor permitió optimizar sin miedo**: cada cambio se comprobó
+  contra ella antes del commit.
+- `pytest` sin ruta, desde la raíz, recorría los worktrees de `.claude/` y se
+  colgaba. Por eso `pytest.ini`.
+
 ## Sesión 17 — 23 sep 2026
 
 Correcciones pedidas tras usar la versión instalada.

@@ -32,11 +32,23 @@ documento cubre la arquitectura y las decisiones de ingeniería.
 
 | 16 | Instalador (Inno Setup) en vez de .exe portable | **Completa** |
 | 17 | Indexación desde el año 2, toggle de percentiles rápido y respetado en el PDF, sin frases de veredicto | **Completa** |
+| 18 | Metas, solver y vista en COP (opcionales), cifras completas, auditoría de bugs y rendimiento, suite depurada, MODELO.md reescrito | **Completa** |
 
-**La aplicación está terminada y funcionando.** 188 tests en verde. Se entrega
-como instalador, `dist\GBP-Setup-<versión>.exe` (57 MB), y `tools/packaging_check.py`
-congelado verifica los recursos embebidos, la persistencia en `%APPDATA%`, el
-motor, la interfaz y el informe PDF.
+**La aplicación está terminada y funcionando.** 139 tests en verde. Una huella
+bit a bit del motor (`tools/fingerprint.py`) protege las cifras de cualquier
+refactor. Se entrega como instalador, `dist\GBP-Setup-<versión>.exe` (35 MB).
+El build prueba el propio ejecutable con `GBP.exe --smoke-test`, y
+`tools/packaging_check.py` congelado verifica los recursos embebidos y la
+persistencia en `%APPDATA%`.
+
+**Tres funciones opcionales.** Si no se usan, la app se ve y calcula igual que
+antes:
+- **Metas**: sección en Escenario, más una pestaña y una lámina que solo
+  aparecen si hay metas.
+- **Solver**: Análisis → Solver….
+- **Vista en COP**: tasa en Escenario y casilla «Ver en COP».
+
+Ver MODELO.md §11–§13.
 
 ## Cómo correrlo
 
@@ -325,7 +337,7 @@ Cuatro reglas que conviene no deshacer:
   pone con `set_xlabel`, que el eje sí reserva. Costó un solapamiento en la
   lámina de distribución.
 
-### Dos trampas de Qt que ya costaron un bug cada una
+### Tres trampas de Qt que ya costaron un bug cada una
 
 **Recargar un editor desde su propia señal de cambio.** Cualquier cambio en
 flujos, crédito o capital emitía `changed`; el panel de estrategias reconstruía
@@ -344,6 +356,12 @@ blanco sobre blanco. Se resolvió con `HeatmapDelegate` en
 `gbp/ui/panels/correlation_panel.py`, que pinta el fondo él mismo. Si algún día
 otra tabla necesita color de celda, hay que usar el mismo delegado.
 
+**Un atributo que pisa un método de Qt.** En la ventana del solver,
+`self.metric = QComboBox()` tapaba `QPaintDevice.metric`, un método **virtual**
+que Qt llama al pintar. `grab()` fallaba dentro de Qt con «QComboBox no es
+invocable». Pasa lo mismo con `window`, `result`, `size`, `font` y parecidos.
+Regla: los atributos de un widget llevan sufijo (`metric_box`, `solve_result`).
+
 ### Dónde vive cada cosa
 
 | Dato | Ubicación | Editable en la UI |
@@ -351,10 +369,12 @@ otra tabla necesita color de celda, hay que usar el mismo delegado.
 | Correlaciones | `gbp/data/correlations.json` (embebido) | No, solo lectura |
 | Retorno / volatilidad / yield del LTCMA | `%APPDATA%/Ikalon/GBP/cma_library.json` | No, solo lectura |
 | Activos propios | misma librería, más copia en el `.gbp.json` | Sí, se crean y editan |
-| Nº de simulaciones, semilla, años hito | `%APPDATA%/Ikalon/GBP/settings.json` | Sí, en Ajustes |
+| Nº de simulaciones y años hito (la semilla es fija, 42) | `%APPDATA%/Ikalon/GBP/settings.json` | Sí, en Ajustes |
 | Caso de la sesión anterior | `%APPDATA%/Ikalon/GBP/last_session.json` | Se guarda al cerrar |
 | Portada del informe (autor, cliente) | `%APPDATA%/Ikalon/GBP/report_defaults.json` | Sí, al exportar |
 | Caso del cliente (escenario + estrategias) | `.gbp.json` elegido por el usuario | Sí |
+| Metas y tasa USD/COP (opcionales) | dentro del `.gbp.json` (esquema 5) | Sí, en Escenario |
+| Huella de referencia del motor | `tests/data/fingerprint.json` | No; `tools/fingerprint.py --write` |
 | Logos Ikalon | `gbp/data/brand/` (embebido) | No |
 
 La librería de CMAs sigue viviendo en `%APPDATA%` y no dentro del ejecutable,
@@ -469,6 +489,17 @@ escenario, que cerraría buena parte de la diferencia.
   (autovalor mínimo −0.016, normal por el redondeo a dos decimales). El JSON
   conserva los valores publicados y la reparación ocurre al cargar; el ajuste
   máximo es de 0.008, es decir cosmético.
+- **Moneda simulada.** La vista en COP es una tasa fija. Modelar la devaluación
+  (USD/COP estocástico y correlacionado) quedó fuera por decisión de Ikalon.
+- **Metas sin buckets.** Las metas se miden sobre el portafolio único de cada
+  estrategia, sin sub-portafolios por meta.
+- **Memoria con 1.000.000 de caminos.** El bloque de retornos ocupa
+  N·T·K·8 bytes (2,4 GB con 30 años y 10 clases). Trocear el sorteo por
+  bloques de caminos lo resolvería, pero podría mover el último bit por el
+  redondeo del producto matricial, así que no se hizo sin decidirlo.
+- **La carpeta `.claude/worktrees/agent-…`** de la limpieza de tests quedó
+  bloqueada por OneDrive y no se pudo borrar. Git ya no la registra y se puede
+  eliminar a mano.
 
 ## Empaquetado e instalador
 
