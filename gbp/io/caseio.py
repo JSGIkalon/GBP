@@ -127,10 +127,12 @@ def to_dict(scenario: Scenario, cmas=None) -> dict:
     return payload
 
 
-def _used_custom_assets(scenario: Scenario, cmas) -> list[dict]:
-    """Activos propios que alguna estrategia usa, con sus supuestos."""
-    from .library import asset_to_dict
+def used_custom_assets(scenario: Scenario, cmas) -> list:
+    """Activos propios que alguna estrategia usa, en el orden en que aparecen.
 
+    Lo usan el guardado del caso —que los embebe— y el informe —que los
+    documenta—: los dos tienen que ver exactamente la misma lista.
+    """
     usados = []
     for name in scenario.asset_names:
         try:
@@ -138,9 +140,19 @@ def _used_custom_assets(scenario: Scenario, cmas) -> list[dict]:
         except KeyError:
             continue
         if asset.is_custom:
-            # Sin `origin`: aquí todos son propios por definición.
-            usados.append(asset_to_dict(asset, with_origin=False))
+            usados.append(asset)
     return usados
+
+
+def _used_custom_assets(scenario: Scenario, cmas) -> list[dict]:
+    """Activos propios que alguna estrategia usa, con sus supuestos."""
+    from .library import asset_to_dict
+
+    # Sin `origin`: aquí todos son propios por definición.
+    return [
+        asset_to_dict(asset, with_origin=False)
+        for asset in used_custom_assets(scenario, cmas)
+    ]
 
 
 def custom_assets_from_dict(payload: dict) -> list:

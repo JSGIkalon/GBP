@@ -36,28 +36,20 @@ MIN_WIDTH_FOR_LABELS = 0.030
 def _box_stats(strategy, years: list[int], real: bool) -> list[dict]:
     """Percentiles, media y desviación de cada año hito, sin escalar.
 
-    Se guardan en la propia estrategia porque calcularlos es lo caro del
-    gráfico: con un millón de caminos, ocultar o mostrar las etiquetas de
-    percentiles tardaba segundos recalculando cifras que no habían cambiado.
-    El resultado de una corrida no se modifica después, así que la caché no
-    puede quedar vieja.
+    Vienen de la caché de la estrategia (`distribution_stats`), que es la
+    misma que usa la tabla: con un millón de caminos, ocultar o mostrar las
+    etiquetas de percentiles tardaba segundos recalculando cifras que no
+    habían cambiado.
     """
-    cache = strategy.__dict__.setdefault("_box_stats_cache", {})
-    key = (tuple(years), real)
-    if key not in cache:
-        data = strategy.values(real)[:, [y - 1 for y in years]]
-        p10, p25, p50, p75, p90 = np.percentile(data, [10, 25, 50, 75, 90], axis=0)
-        means = data.mean(axis=0)
-        stds = data.std(axis=0)
-        cache[key] = [
-            {
-                "med": float(p50[i]), "q1": float(p25[i]), "q3": float(p75[i]),
-                "whislo": float(p10[i]), "whishi": float(p90[i]),
-                "mean": float(means[i]), "std": float(stds[i]),
-            }
-            for i in range(len(years))
-        ]
-    return cache[key]
+    s = strategy.distribution_stats(years, real)
+    return [
+        {
+            "med": float(s[50][i]), "q1": float(s[25][i]), "q3": float(s[75][i]),
+            "whislo": float(s[10][i]), "whishi": float(s[90][i]),
+            "mean": float(s["mean"][i]), "std": float(s["std"][i]),
+        }
+        for i in range(len(years))
+    ]
 
 
 def draw_box_chart(
@@ -121,6 +113,8 @@ def draw_box_chart(
     ax.set_ylabel(f"Patrimonio neto ({unit}{', en moneda de hoy' if real else ''})")
     ax.axhline(0, color=BASELINE, linewidth=1, zorder=1)
     clean_axes(ax)
+    # Aire arriba y abajo: para las etiquetas de p10/p90 y, con dos o más
+    # estrategias, para la leyenda sobre el eje.
     ax.margins(y=0.12)
     ax.tick_params(axis="x", pad=12)
 
@@ -142,10 +136,6 @@ def draw_box_chart(
             columnspacing=1.6,
             handlelength=1.4,
         )
-    if n_strategies >= 2:
-        # Sin título, la leyenda necesita algo de aire encima del eje para no
-        # quedar pegada al borde superior de la página.
-        ax.margins(y=0.12)
 
     # La nota va **dentro del eje**, no colgando por debajo en coordenadas de
     # eje: con `xy=(0, -0.16)` caía fuera del área de trazado y, en la geometría
@@ -231,9 +221,9 @@ def distribution_table_rows(result: SimulationResult, years: list[int], real: bo
     """
     rows = []
     for strategy in result.strategies:
-        pct = strategy.percentiles(years, real)
-        means = strategy.mean(years, real)
-        stds = strategy.std(years, real)
+        # Las mismas cifras que el gráfico, de la misma caché: no se recalculan.
+        pct = strategy.distribution_stats(years, real)
+        means, stds = pct["mean"], pct["std"]
         for i, year in enumerate(years):
             rows.append(
                 {

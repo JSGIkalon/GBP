@@ -45,6 +45,10 @@ class StrategyResult:
     contributions: np.ndarray = field(default_factory=lambda: np.zeros(0))
     withdrawals: np.ndarray = field(default_factory=lambda: np.zeros(0))
     initial_value: float = 0.0
+    # Estadísticas ya calculadas. Un resultado no cambia después de la corrida,
+    # así que la caché no puede quedar vieja; y con un millón de caminos cada
+    # mediana o percentil sobre la matriz completa es lo caro de redibujar.
+    _cache: dict = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def n_paths(self) -> int:
@@ -54,11 +58,47 @@ class StrategyResult:
     def horizon(self) -> int:
         return self.wealth.shape[1]
 
+    def _cached(self, key, compute):
+        if key not in self._cache:
+            self._cache[key] = compute()
+        return self._cache[key]
+
     def values(self, real: bool = False) -> np.ndarray:
         """Patrimonio neto en términos nominales o en poder adquisitivo de hoy."""
         if not real or self.inflation_factors.size == 0:
             return self.wealth
+        # Sin caché a propósito: sería una segunda copia de la corrida entera en
+        # memoria. Lo que se calcula sobre ella sí se cachea, y los cálculos
+        # internos cortan antes de deflactar (`_columns`).
         return self.wealth / self.inflation_factors
+
+    def _columns(self, years: list[int], real: bool) -> np.ndarray:
+        """Solo los años pedidos, deflactados después de cortar.
+
+        Dividir la matriz completa para quedarse con cuatro columnas era copiar
+        la corrida entera en cada llamada. El resultado es idéntico: cada celda
+        se divide por el mismo factor.
+        """
+        idx = [y - 1 for y in years]
+        data = self.wealth[:, idx]
+        if real and self.inflation_factors.size:
+            data = data / self.inflation_factors[idx]
+        return data
+
+    def distribution_stats(self, years: list[int], real: bool = False) -> dict:
+        """Percentiles, media y desviación de los años pedidos, calculados una vez.
+
+        Es lo que consumen el box plot, su tabla y el informe: antes cada uno
+        recalculaba los mismos cinco percentiles por su lado.
+        """
+        def compute():
+            data = self._columns(years, real)
+            p10, p25, p50, p75, p90 = np.percentile(data, [10, 25, 50, 75, 90], axis=0)
+            return {
+                10: p10, 25: p25, 50: p50, 75: p75, 90: p90,
+                "mean": data.mean(axis=0), "std": data.std(axis=0),
+            }
+        return self._cached(("stats", tuple(years), real), compute)
 
     def percentiles(
         self,
@@ -75,25 +115,32 @@ class StrategyResult:
         """
         if years is None:
             years = list(range(1, self.horizon + 1))
-        idx = [y - 1 for y in years]
-        data = self.values(real)[:, idx]
         wanted = percentiles if percentiles is not None else PERCENTILES
+        data = self._columns(years, real)
         return {p: np.percentile(data, p, axis=0) for p in wanted}
 
     def mean(self, years: list[int] | None = None, real: bool = False) -> np.ndarray:
-        years = years or list(range(1, self.horizon + 1))
-        return self.values(real)[:, [y - 1 for y in years]].mean(axis=0)
+        if years is None:
+            years = list(range(1, self.horizon + 1))
+        return self._columns(years, real).mean(axis=0)
 
     def std(self, years: list[int] | None = None, real: bool = False) -> np.ndarray:
         """Desviación estándar del patrimonio en cada año indicado."""
-        years = years or list(range(1, self.horizon + 1))
-        return self.values(real)[:, [y - 1 for y in years]].std(axis=0)
+        if years is None:
+            years = list(range(1, self.horizon + 1))
+        return self._columns(years, real).std(axis=0)
 
     def cvar(self, year: int, level: float = 0.05, real: bool = False) -> float:
-        """Valor esperado en el peor `level` de los caminos (CVaR)."""
-        data = np.sort(self.values(real)[:, year - 1])
+        """Valor esperado en el peor `level` de los caminos (CVaR).
+
+        Basta separar la cola con `partition` en vez de ordenar el millón de
+        caminos. La cola se ordena después —es chica— para que la suma se haga
+        en el mismo orden de siempre y la cifra no cambie ni en el último bit.
+        """
+        data = self._columns([year], real)[:, 0]
         cut = max(1, int(round(level * len(data))))
-        return float(data[:cut].mean())
+        tail = np.sort(np.partition(data, cut - 1)[:cut])
+        return float(tail.mean())
 
     @property
     def success_probability(self) -> float:
@@ -102,7 +149,20 @@ class StrategyResult:
         Un camino "falla" si en algún año el patrimonio neto llega a cero o
         menos, es decir si los retiros y la deuda consumen el portafolio.
         """
-        return float((self.wealth > 0).all(axis=1).mean())
+        return self._cached(
+            "success", lambda: float((self.wealth > 0).all(axis=1).mean())
+        )
+
+    @property
+    def debt_peak(self) -> float:
+        """Máximo saldo de deuda de toda la corrida; cero si no hubo crédito."""
+        return self._cached(
+            "debt_peak", lambda: float(self.debt.max()) if self.debt.size else 0.0
+        )
+
+    @property
+    def has_debt(self) -> bool:
+        return self.debt_peak > 0
 
     @property
     def margin_call_probability(self) -> float:
@@ -111,7 +171,7 @@ class StrategyResult:
         return float((self.margin_calls > 0).mean())
 
     def terminal_values(self, real: bool = False) -> np.ndarray:
-        return self.values(real)[:, -1]
+        return self._columns([self.horizon], real)[:, 0]
 
     def last_year_change(self, real: bool = False) -> float:
         """Variación mediana del patrimonio neto en el **último año proyectado**.
@@ -125,9 +185,9 @@ class StrategyResult:
         positivo: de un patrimonio agotado no hay variación porcentual que
         signifique nada.
         """
-        values = self.values(real)
+        last = self._columns([self.horizon], real)[:, 0]
         if self.horizon >= 2:
-            previous = values[:, -2]
+            previous = self._columns([self.horizon - 1], real)[:, 0]
         else:
             # Con un solo año, el punto de partida es el capital del año 0, que
             # ya está en moneda de hoy: no se deflacta.
@@ -135,7 +195,7 @@ class StrategyResult:
         alive = previous > 0
         if not alive.any():
             return float("nan")
-        return float(np.median(values[alive, -1] / previous[alive] - 1.0))
+        return float(np.median(last[alive] / previous[alive] - 1.0))
 
     def flow_history(self, real: bool = False) -> dict[str, np.ndarray]:
         """Aportes y retiros medianos por año, alineados a `1..horizon`.
@@ -144,17 +204,21 @@ class StrategyResult:
         promedio lo sube un puñado de caminos muy ricos y dejaría de parecerse
         al retiro que se ve en un año corriente.
         """
-        horizon = self.horizon
-        if self.contributions.size == 0:
-            aportes = np.zeros(horizon)
-            retiros = np.zeros(horizon)
-        else:
-            aportes = np.median(self.contributions, axis=0)
-            retiros = np.median(self.withdrawals, axis=0)
-        if real and self.inflation_factors.size:
-            aportes = aportes / self.inflation_factors
-            retiros = retiros / self.inflation_factors
-        return {"aportes": aportes, "retiros": retiros, "neto": aportes - retiros}
+        def compute():
+            horizon = self.horizon
+            if self.contributions.size == 0:
+                aportes = np.zeros(horizon)
+                retiros = np.zeros(horizon)
+            else:
+                # Sin flujos porcentuales se guardan como una sola fila —son
+                # iguales en todos los caminos— y su mediana es esa fila.
+                aportes = np.median(self.contributions, axis=0)
+                retiros = np.median(self.withdrawals, axis=0)
+            if real and self.inflation_factors.size:
+                aportes = aportes / self.inflation_factors
+                retiros = retiros / self.inflation_factors
+            return {"aportes": aportes, "retiros": retiros, "neto": aportes - retiros}
+        return self._cached(("flows", real), compute)
 
     def flow_value_series(self) -> dict[str, np.ndarray]:
         """Flujos netos y valor de portafolio mediano, año por año.
@@ -165,13 +229,16 @@ class StrategyResult:
         unidades. Vive aquí y no en la UI ni en el informe porque los dos la
         necesitan igual.
         """
-        neto = self.flow_history()["neto"]
-        return {
-            "neto": neto,
-            "acumulado": np.cumsum(neto),
-            "valor_nominal": np.median(self.values(False), axis=0),
-            "valor_real": np.median(self.values(True), axis=0),
-        }
+        def compute():
+            neto = self.flow_history()["neto"]
+            all_years = list(range(1, self.horizon + 1))
+            return {
+                "neto": neto,
+                "acumulado": np.cumsum(neto),
+                "valor_nominal": np.median(self.wealth, axis=0),
+                "valor_real": np.median(self._columns(all_years, True), axis=0),
+            }
+        return self._cached("flow_values", compute)
 
 
 @dataclass

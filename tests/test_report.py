@@ -269,5 +269,7 @@ def test_las_cifras_del_grafico_coinciden_con_la_tabla(corrida):
             pct = strategy.percentiles(years, real)
             assert [s["med"] for s in stats] == pytest.approx(list(pct[50]))
             assert [s["whislo"] for s in stats] == pytest.approx(list(pct[10]))
-            assert _box_stats(strategy, years, real) is stats  # segunda vez, de caché
             assert np.isfinite([s["std"] for s in stats]).all()
+            # La caché devuelve exactamente lo mismo que calcular de nuevo.
+            fresco = strategy.percentiles(years, real, percentiles=[10, 50, 90])
+            assert list(strategy.distribution_stats(years, real)[90]) == list(fresco[90])

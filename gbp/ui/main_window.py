@@ -575,7 +575,7 @@ class MainWindow(QMainWindow):
         ) != QMessageBox.StandardButton.Yes:
             return
 
-        has_debt = any(s.debt.max() > 0 for s in result.strategies)
+        has_debt = any(s.has_debt for s in result.strategies)
         dialog = ExportDialog(scenario.name, has_debt, self)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return

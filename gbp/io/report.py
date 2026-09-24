@@ -61,6 +61,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.figure import Figure
 
 from ..model.groups import group_summary
+from .caseio import used_custom_assets
 from ..model.results import SimulationResult
 from ..model.scenario import Scenario, SimulationSettings
 from ..ui.charts.allocation_chart import allocation_table_rows, draw_allocation_chart
@@ -227,8 +228,7 @@ def _wrap(text: str, width: int) -> list[str]:
 # de mirar un solo resultado. El mismo patrón "número grande / eyebrow debajo"
 # que usan las tarjetas KPI del cuerpo, para que la portada anticipe el
 # lenguaje visual del resto del informe en vez de abrir con un párrafo.
-def _cover_kpis(scenario: Scenario, result: SimulationResult,
-                settings: SimulationSettings) -> list[tuple[str, str]]:
+def _cover_kpis(scenario: Scenario, result: SimulationResult) -> list[tuple[str, str]]:
     return [
         (format_money(scenario.initial_value), "Capital inicial"),
         (f"{scenario.horizon} años", "Horizonte"),
@@ -265,7 +265,7 @@ def _cover(pdf: PdfPages, options: ReportOptions, scenario: Scenario,
     # margen de la página.
     _add_rule(figure, y)
     y -= 0.05
-    kpis = _cover_kpis(scenario, result, settings)
+    kpis = _cover_kpis(scenario, result)
     ancho = (1 - 2 * MARGIN) / len(kpis)
     for i, (value, label) in enumerate(kpis):
         x = MARGIN + i * ancho
@@ -1054,15 +1054,7 @@ def _custom_used(scenario: Scenario, options: ReportOptions) -> list:
     """Activos propios que el caso usa, para documentarlos en el informe."""
     if options.cmas is None:
         return []
-    usados = []
-    for name in scenario.asset_names:
-        try:
-            asset = options.cmas.by_name(name)
-        except KeyError:
-            continue
-        if asset.is_custom:
-            usados.append(asset)
-    return usados
+    return used_custom_assets(scenario, options.cmas)
 
 
 # ----------------------------------------------------------------------
@@ -1084,10 +1076,6 @@ class _AnnexTable:
     columns: list[str]
     per_strategy: list[tuple[str, list[list[str]]]]
     footnote: str = ""
-
-    @property
-    def title(self) -> str:
-        return self.kind
 
     @property
     def strategies(self) -> list[str]:
@@ -1336,7 +1324,7 @@ def build_report(
     real = False
     years = settings.milestones_within(scenario.horizon)
     moneda = "Valores nominales."
-    con_deuda = options.include_debt and any(s.debt.max() > 0 for s in result.strategies)
+    con_deuda = options.include_debt and any(s.has_debt for s in result.strategies)
 
     annex = _build_annex(options, scenario, result, years, con_deuda)
     flows = _flows_table(result) if options.include_flows else None

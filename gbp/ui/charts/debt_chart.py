@@ -14,7 +14,7 @@ def draw_debt_chart(canvas, result: SimulationResult):
         canvas.show_message("Corre la simulación para ver la deuda.")
         return
 
-    if all(s.debt.max() == 0 for s in result.strategies):
+    if not any(s.has_debt for s in result.strategies):
         canvas.show_message(
             "Este caso no tiene apalancamiento.\n"
             "Configura un crédito en la pestaña Apalancamiento para ver su evolución."
@@ -23,16 +23,15 @@ def draw_debt_chart(canvas, result: SimulationResult):
 
     ax = canvas.clear()
     years = np.arange(1, result.horizon + 1)
-    peak = max(float(s.debt.max()) for s in result.strategies)
+    peak = max(s.debt_peak for s in result.strategies)
     scale = 1_000_000.0 if peak >= 1_000_000 else 1.0
     unit = "millones" if scale > 1 else "unidades"
 
     series_data = []
     for i, strategy in enumerate(result.strategies):
-        debt = strategy.debt / scale
-        median = np.median(debt, axis=0)
-        low = np.percentile(debt, 5, axis=0)
-        high = np.percentile(debt, 95, axis=0)
+        # Una sola pasada por los tres percentiles y la escala al final, sobre
+        # tres filas y no sobre la matriz entera de caminos.
+        low, median, high = np.percentile(strategy.debt, [5, 50, 95], axis=0) / scale
         color = series_color(i)
         ax.fill_between(years, low, high, color=color, alpha=0.16, linewidth=0, zorder=1)
         ax.plot(years, median, color=color, linewidth=2, label=strategy.name, zorder=2)
