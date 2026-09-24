@@ -73,6 +73,21 @@ def test_las_cifras_se_muestran_completas_con_punto_de_miles():
     assert format_money(-0.2) == "0"
 
 
+def test_la_escala_de_lectura_divide_y_dice_su_unidad():
+    from gbp.ui.theme import amount_unit, format_display, set_display_scale
+
+    try:
+        assert format_display(25_000_000) == "25.000.000" and amount_unit() == ""
+        set_display_scale("millones")
+        assert format_display(25_000_000) == "25,0"
+        assert format_display(1_154_785) == "1,2"
+        assert amount_unit("COP") == "millones de COP"
+        set_display_scale("miles")
+        assert format_display(1_154_785) == "1.154,8"
+    finally:
+        set_display_scale("normal")  # estado global: no se filtra a otros tests
+
+
 def test_la_vista_en_cop_escala_montos_y_no_toca_probabilidades(simple_cmas, simple_corr):
     usd = simulate(_caso(), simple_cmas, simple_corr, SETTINGS)
     cop = usd.in_currency(4_000.0)
@@ -147,18 +162,21 @@ def test_el_solver_avisa_si_el_objetivo_es_inalcanzable(simple_cmas, simple_corr
     assert r.value is None and "cero" in r.message
 
 
-def test_el_esquema_5_guarda_metas_y_tasa_y_el_4_abre_igual(simple_cmas, simple_corr):
-    caso = _caso(goals=[Goal("Legado", 5_000_000.0)], fx_spot=4_150.5)
-    vuelta = from_dict(json.loads(json.dumps(to_dict(caso))))
-    assert vuelta.fx_spot == 4_150.5
+def test_el_esquema_5_guarda_metas_y_el_4_abre_igual(simple_cmas, simple_corr):
+    caso = _caso(goals=[Goal("Legado", 5_000_000.0)])
+    guardado = json.loads(json.dumps(to_dict(caso)))
+    # La tasa COP es de la app, no del caso: no se guarda, y si un caso viejo
+    # la trae, se ignora sin romper.
+    assert "fx_spot" not in guardado["scenario"]
+    guardado["scenario"]["fx_spot"] = 4_150.5
+    vuelta = from_dict(guardado)
     assert vuelta.goals[0].name == "Legado" and vuelta.goals[0].year is None
 
     viejo = to_dict(_caso())
     viejo["schema"] = 4
     viejo["scenario"].pop("goals")
-    viejo["scenario"].pop("fx_spot")
     abierto = from_dict(viejo)
-    assert abierto.goals == [] and abierto.fx_spot is None
+    assert abierto.goals == []
     a = simulate(abierto, simple_cmas, simple_corr, SETTINGS).strategies[0].wealth
     b = simulate(_caso(), simple_cmas, simple_corr, SETTINGS).strategies[0].wealth
     assert np.array_equal(a, b)

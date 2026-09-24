@@ -36,7 +36,7 @@ from ..charts.allocation_chart import allocation_table_rows, draw_allocation_cha
 from ..charts.box_chart import distribution_table_rows, draw_box_chart
 from ..charts.canvas import ChartCanvas
 from ..charts.debt_chart import draw_debt_chart
-from ..theme import INK_SOFT, format_money
+from ..theme import INK_SOFT, amount_unit, format_display
 
 EMPTY = "Carga los datos del caso y pulsa «Correr simulación»."
 
@@ -52,6 +52,19 @@ def _table(columns: list[str]) -> QTableWidget:
     for i in range(1, len(columns)):
         header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
     return table
+
+
+def _mark_currency(table: QTableWidget, columns: list[str], money: set[str], currency: str):
+    """Rótulos con la unidad en las columnas de montos, solo si no es la de siempre.
+
+    En la vista normal (cifra completa, USD) los rótulos quedan exactamente como
+    antes. En COP, o en miles o millones, cada columna en dinero dice su unidad
+    —«(millones de COP)»—, para que una cifra no se pueda leer sin ella.
+    """
+    unit = amount_unit(currency)
+    table.setHorizontalHeaderLabels(
+        [f"{c} ({unit})" if unit and c in money else c for c in columns]
+    )
 
 
 def _fill(table: QTableWidget, rows: list[dict], columns: list[str]):
@@ -263,7 +276,7 @@ class ResultsPanel(QTabWidget):
         self.years = settings.milestones_within(horizon)
         self._render()
 
-    def set_view(self, fx_rate: float | None, goals: list):
+    def set_view(self, fx_rate: float | None, goals: list, force: bool = False):
         """Moneda de lectura y metas del caso, que no requieren volver a simular.
 
         Las dos son del caso vivo y no de la corrida: cambiar la tasa o agregar
@@ -275,7 +288,7 @@ class ResultsPanel(QTabWidget):
         self._sync_goals_tab()
         if self.base_result is None:
             return
-        if changed_rate:
+        if changed_rate or force:
             self._render()
         else:
             self._show_goals()
@@ -296,6 +309,8 @@ class ResultsPanel(QTabWidget):
         self._draw_distributions()
         for table, real in ((self.range_table, False), (self.real_table, True)):
             _fill(table, distribution_table_rows(result, self.years, real), self.range_columns)
+            _mark_currency(table, self.range_columns, set(self.range_columns[2:]),
+                           result.currency)
 
         self._show_summary(result)
         self._show_debt(result)
@@ -325,7 +340,7 @@ class ResultsPanel(QTabWidget):
                 "Año": "final" if goal.year is None else goal.year,
                 # La meta se define en la moneda del caso; en la vista COP se
                 # muestra convertida con la misma tasa que el resto.
-                "Monto": format_money(goal.amount * rate),
+                "Monto": format_display(goal.amount * rate),
                 "Unidad": "moneda de hoy" if goal.real else "nominal",
                 "Prioridad": goal.priority.value,
             }
@@ -334,6 +349,7 @@ class ResultsPanel(QTabWidget):
                 row[strategy.name] = "fuera del horizonte" if np.isnan(p) else f"{p:.1%}"
             rows.append(row)
         _fill(self.goals_table, rows, columns)
+        _mark_currency(self.goals_table, columns, {"Monto"}, result.currency)
 
     # ------------------------------------------------------------------
     def _show_flows_selector(self, result: SimulationResult):
@@ -352,16 +368,18 @@ class ResultsPanel(QTabWidget):
         rows = [
             {
                 "Año": year,
-                "Flujos netos": format_money(float(valores["neto"][year - 1])),
-                "Flujos netos acumulados": format_money(float(valores["acumulado"][year - 1])),
-                "Valor portafolio": format_money(float(valores["valor_nominal"][year - 1])),
-                "Valor portafolio (moneda de hoy)": format_money(
+                "Flujos netos": format_display(float(valores["neto"][year - 1])),
+                "Flujos netos acumulados": format_display(float(valores["acumulado"][year - 1])),
+                "Valor portafolio": format_display(float(valores["valor_nominal"][year - 1])),
+                "Valor portafolio (moneda de hoy)": format_display(
                     float(valores["valor_real"][year - 1])
                 ),
             }
             for year in range(1, strategy.horizon + 1)
         ]
         _fill(self.flows_table, rows, self.flow_columns)
+        _mark_currency(self.flows_table, self.flow_columns, set(self.flow_columns[1:]),
+                       self.result.currency)
 
     # ------------------------------------------------------------------
     def _show_summary(self, result: SimulationResult):
@@ -384,11 +402,11 @@ class ResultsPanel(QTabWidget):
             ("Sharpe de largo plazo", lambda s: f"{s.summary.sharpe_ratio:.2f}"),
             (
                 "Patrimonio mediano final",
-                lambda s: format_money(float(np.median(s.terminal_values(real)))),
+                lambda s: format_display(float(np.median(s.terminal_values(real)))),
             ),
             (
                 "CVaR 5% al final",
-                lambda s: format_money(s.cvar(s.horizon, 0.05, real)),
+                lambda s: format_display(s.cvar(s.horizon, 0.05, real)),
             ),
             (
                 "Cambio del patrimonio en el último año",
@@ -396,8 +414,11 @@ class ResultsPanel(QTabWidget):
             ),
         ]
 
+        money_rows = {"Patrimonio mediano final", "CVaR 5% al final"}
         self.summary_table.setRowCount(len(indicators))
         for r, (label, getter) in enumerate(indicators):
+            if amount_unit(result.currency) and label in money_rows:
+                label = f"{label} ({amount_unit(result.currency)})"
             self.summary_table.setItem(r, 0, QTableWidgetItem(label))
             for c, strategy in enumerate(result.strategies, start=1):
                 item = QTableWidgetItem(getter(strategy))
@@ -419,9 +440,11 @@ class ResultsPanel(QTabWidget):
                         if strategy.margin_calls.size else "0.00"
                     ),
                     "Liquidación máxima": (
-                        format_money(float(strategy.forced_sales.max()))
+                        format_display(float(strategy.forced_sales.max()))
                         if strategy.forced_sales.size else "0"
                     ),
                 }
             )
         _fill(self.debt_table, rows, self.debt_columns)
+        _mark_currency(self.debt_table, self.debt_columns, {"Liquidación máxima"},
+                       result.currency)

@@ -28,12 +28,27 @@ class SimulationSettings:
     n_paths: int = 10_000
     seed: int | None = 42
     milestone_years: list[int] = field(default_factory=lambda: [5, 10, 15, 20])
+    # Vista en pesos, opcional. Es de la app y no del caso: la tasa es un dato
+    # de mercado, el mismo para todos los clientes, y ver o no en COP es una
+    # preferencia de lectura. Ninguna de las dos entra a la simulación.
+    fx_spot: float | None = None
+    show_cop: bool = False
+    # Escala en que se leen los resultados: "normal", "miles", "millones" o
+    # "miles_de_millones". Solo cambia cómo se muestran las cifras.
+    display_scale: str = "normal"
 
     def __post_init__(self) -> None:
         if self.n_paths < 100:
             raise ValueError("Se necesitan al menos 100 simulaciones.")
         if self.n_paths > 1_000_000:
             raise ValueError("El máximo razonable es 1.000.000 de simulaciones.")
+        if self.fx_spot is not None and self.fx_spot <= 0:
+            self.fx_spot = None
+
+    @property
+    def cop_rate(self) -> float | None:
+        """La tasa a aplicar, o `None` si la vista en COP no está activa."""
+        return self.fx_spot if (self.show_cop and self.fx_spot) else None
 
     def milestones_within(self, horizon: int) -> list[int]:
         """Años hito que caben en el horizonte, sin repetidos y ordenados.
@@ -63,24 +78,15 @@ class Scenario:
     horizon: int = 30
     inflation: float = 0.025
     strategies: list[Strategy] = field(default_factory=list)
-    # Opcionales: un caso sin metas y sin tasa se comporta exactamente como
-    # antes de que existieran. Ninguno de los dos entra a la simulación.
+    # Opcionales: un caso sin metas se comporta exactamente como antes de que
+    # existieran. No entran a la simulación.
     goals: list[Goal] = field(default_factory=list)
-    # Pesos colombianos por dólar, para **ver** los resultados en COP. Es una
-    # tasa fija: convierte cifras, no modela la moneda.
-    fx_spot: float | None = None
 
     def __post_init__(self) -> None:
         if self.horizon < 1:
             raise ValueError("El horizonte debe ser de al menos un año.")
         if self.initial_value < 0:
             raise ValueError("El capital inicial no puede ser negativo.")
-        if self.fx_spot is not None and self.fx_spot <= 0:
-            self.fx_spot = None
-
-    @property
-    def has_fx(self) -> bool:
-        return self.fx_spot is not None and self.fx_spot > 0
 
     def validate(self, cmas: CMASet) -> None:
         """Verifica que el caso se pueda simular con la librería de CMAs dada."""

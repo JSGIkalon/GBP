@@ -1,4 +1,4 @@
-﻿"""Informe PDF de una corrida: el registro de la simulación y lo que se entrega.
+"""Informe PDF de una corrida: el registro de la simulación y lo que se entrega.
 
 El PDF se arma **con matplotlib**, no con una librería de maquetación. Dos
 razones, y las dos pesan:
@@ -80,8 +80,9 @@ from ..ui.theme import (
     LEADER,
     NAVY,
     NEUTRAL,
+    amount_unit,
     apply_matplotlib_style,
-    format_money,
+    format_display,
     format_number,
     series_color,
 )
@@ -249,21 +250,27 @@ def _money(value: float, options: ReportOptions) -> str:
     moneda de los supuestos y se convierten aquí, con la misma tasa, para que
     el documento no mezcle dos monedas.
     """
-    return format_money(value * (options.fx_spot or 1.0))
+    return format_display(value * (options.fx_spot or 1.0))
 
 
 def _currency_note(options: ReportOptions) -> str:
-    if not options.fx_spot:
-        return ""
-    return (
-        f"Cifras en pesos colombianos (COP) a una tasa fija de "
-        f"{format_number(options.fx_spot)} COP por USD; el caso se proyecta en USD."
-    )
+    """La unidad de las cifras en dinero, o "" si es la de siempre (USD completos)."""
+    partes = []
+    escala = amount_unit("")
+    if escala:
+        partes.append(f"Cifras en {escala}.")
+    if options.fx_spot:
+        partes.append(
+            f"Cifras en pesos colombianos (COP) a una tasa fija de "
+            f"{format_number(options.fx_spot)} COP por USD; el caso se proyecta en USD."
+        )
+    return " ".join(partes)
 
 
 def _cover_kpis(scenario: Scenario, result: SimulationResult,
                 options: ReportOptions) -> list[tuple[str, str]]:
-    capital = "Capital inicial (COP)" if options.fx_spot else "Capital inicial"
+    unidad = amount_unit("COP" if options.fx_spot else "")
+    capital = f"Capital inicial ({unidad})" if unidad else "Capital inicial"
     return [
         (_money(scenario.initial_value, options), capital),
         (f"{scenario.horizon} años", "Horizonte"),
@@ -295,7 +302,7 @@ def _cover(pdf: PdfPages, options: ReportOptions, scenario: Scenario,
     if ficha:
         figure.text(MARGIN, y, ficha, color=INK_SOFT, fontsize=10)
         y -= 0.045
-    if options.fx_spot:
+    if _currency_note(options):
         figure.text(MARGIN, y, _currency_note(options), color=INK_SOFT, fontsize=10)
         y -= 0.045
 
@@ -1150,8 +1157,8 @@ SUMMARY_INDICATORS = [
     ("Yield de largo plazo", lambda s, real: f"{s.summary.yield_:.2%}"),
     ("Sharpe de largo plazo", lambda s, real: f"{s.summary.sharpe_ratio:.2f}"),
     ("Patrimonio mediano final",
-     lambda s, real: format_money(float(np.median(s.terminal_values(real))))),
-    ("CVaR 5% al final", lambda s, real: format_money(s.cvar(s.horizon, 0.05, real))),
+     lambda s, real: format_display(float(np.median(s.terminal_values(real))))),
+    ("CVaR 5% al final", lambda s, real: format_display(s.cvar(s.horizon, 0.05, real))),
     ("Cambio del patrimonio en el último año",
      lambda s, real: f"{s.last_year_change(real):.2%}"),
 ]
@@ -1271,7 +1278,7 @@ def _build_annex(
                      f"{strategy.margin_calls.mean():.2f}"
                      if strategy.margin_calls.size else "0.00"],
                     ["Liquidación forzada máxima",
-                     format_money(float(strategy.forced_sales.max()))
+                     format_display(float(strategy.forced_sales.max()))
                      if strategy.forced_sales.size else "0"],
                 ],
             ))
@@ -1305,10 +1312,10 @@ def _flows_table(result: SimulationResult) -> _AnnexTable | None:
             [
                 [
                     str(year),
-                    format_money(float(valores["neto"][year - 1])),
-                    format_money(float(valores["acumulado"][year - 1])),
-                    format_money(float(valores["valor_nominal"][year - 1])),
-                    format_money(float(valores["valor_real"][year - 1])),
+                    format_display(float(valores["neto"][year - 1])),
+                    format_display(float(valores["acumulado"][year - 1])),
+                    format_display(float(valores["valor_nominal"][year - 1])),
+                    format_display(float(valores["valor_real"][year - 1])),
                 ]
                 for year in range(1, strategy.horizon + 1)
             ],

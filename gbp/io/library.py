@@ -238,10 +238,14 @@ def load_settings() -> SimulationSettings:
         if payload.get("schema", 1) < 2 and milestones == LEGACY_MILESTONES:
             milestones = list(defaults.milestone_years)
 
+        fx_spot = payload.get("fx_spot")
         return SimulationSettings(
             n_paths=int(payload.get("n_paths", defaults.n_paths)),
             seed=defaults.seed,
             milestone_years=milestones,
+            fx_spot=float(fx_spot) if fx_spot else None,
+            show_cop=bool(payload.get("show_cop", False)),
+            display_scale=str(payload.get("display_scale", "normal")),
         )
     except (TypeError, ValueError, AttributeError, OSError):
         # Un archivo corrupto no debería impedir abrir la app.

@@ -8,7 +8,6 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QFileDialog,
     QHBoxLayout,
@@ -47,7 +46,16 @@ from .panels.settings_panel import SettingsPanel
 from .panels.strategies_panel import StrategiesPanel
 from .sample_case import build_sample_case, empty_case
 from .solver_dialog import SolverDialog
-from .theme import INK, INK_SOFT, NAVY, STYLESHEET, format_number
+from .theme import (
+    INK,
+    INK_SOFT,
+    NAVY,
+    STYLESHEET,
+    amount_unit,
+    display_scale,
+    format_number,
+    set_display_scale,
+)
 from .worker import start_simulation, start_task
 
 FILE_FILTER = f"Casos de GBP (*{EXTENSION});;Todos los archivos (*)"
@@ -163,6 +171,7 @@ class MainWindow(QMainWindow):
         self.strategies_panel.changed.connect(self._on_scenario_changed)
         self.assets_panel.changed.connect(self._on_assets_changed)
         self.settings_panel.changed.connect(self._on_settings_changed)
+        self.settings_panel.view_changed.connect(self._apply_result_view)
 
         splitter.addWidget(self.inputs)
 
@@ -207,17 +216,21 @@ class MainWindow(QMainWindow):
         )
         run_bar.insertWidget(1, self.export_button)  # junto a «Correr», antes de la barra
 
-        # La vista en pesos, como la casilla de percentiles: cambia cómo se leen
-        # las cifras, no la corrida. Apagada y deshabilitada mientras el caso no
-        # tenga tasa, así que quien no la usa no ve ninguna diferencia.
-        self.cop_toggle = QCheckBox("Ver en COP")
-        self.cop_toggle.toggled.connect(self._apply_result_view)
-        run_bar.addWidget(self.cop_toggle)
-
         self.status = QLabel("")
         self.status.setStyleSheet(f"color: {INK};")
         run_bar.addWidget(self.status, 2)
         right_layout.addLayout(run_bar)
+
+        # Aviso fijo de moneda: con la vista en COP activa (se activa en
+        # Ajustes) tiene que ser imposible leer una cifra sin saber que está en
+        # pesos. Oculto en la vista normal, así que quien no la usa no ve nada.
+        self.currency_banner = QLabel("")
+        self.currency_banner.setWordWrap(True)
+        self.currency_banner.setStyleSheet(
+            f"background-color: {NAVY}; color: white; font-weight: 600; padding: 7px 12px;"
+        )
+        self.currency_banner.setVisible(False)
+        right_layout.addWidget(self.currency_banner)
 
         self.results = ResultsPanel()
         right_layout.addWidget(self.results, 1)
@@ -338,23 +351,22 @@ class MainWindow(QMainWindow):
         self._flag_stale_results()
 
     def _apply_result_view(self, *_):
-        """Moneda y metas de lectura, del caso vivo; no piden volver a simular."""
-        spot = self.scenario.fx_spot if self.scenario.has_fx else None
-        self.cop_toggle.setEnabled(spot is not None)
-        if spot is None:
-            self.cop_toggle.blockSignals(True)
-            self.cop_toggle.setChecked(False)
-            self.cop_toggle.blockSignals(False)
-            self.cop_toggle.setToolTip(
-                "Escribe una tasa USD/COP en la pestaña Escenario para ver las cifras en pesos."
-            )
-        else:
-            self.cop_toggle.setToolTip(
-                f"Todas las cifras en pesos a una tasa fija de {format_number(spot)} COP "
-                "por USD. Las probabilidades no cambian."
-            )
-        rate = spot if (spot is not None and self.cop_toggle.isChecked()) else None
-        self.results.set_view(rate, self.scenario.goals)
+        """Moneda (de Ajustes) y metas (del caso vivo); no piden volver a simular."""
+        rate = self.settings.cop_rate
+        scale_changed = display_scale() != self.settings.display_scale
+        set_display_scale(self.settings.display_scale)
+        unidad = amount_unit("COP" if rate else "")
+        self.currency_banner.setVisible(bool(unidad))
+        if unidad:
+            partes = [f"Resultados en {unidad}."]
+            if rate:
+                partes.append(
+                    f"Tasa fija de {format_number(rate)} COP por USD; todo se simula en USD."
+                )
+            partes.append("Los datos del caso se ingresan en USD y en cifra completa. "
+                          "Se cambia en Ajustes.")
+            self.currency_banner.setText(" ".join(partes))
+        self.results.set_view(rate, self.scenario.goals, force=scale_changed)
 
     # ------------------------------------------------------------------
     def open_solver(self):
@@ -367,10 +379,8 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _solve_signature(scenario) -> dict:
-        """Lo que decide el resultado del solver: todo el caso menos la tasa COP."""
-        data = dict(to_dict(scenario)["scenario"])
-        data.pop("fx_spot", None)
-        return data
+        """Lo que decide el resultado del solver: el caso entero, metas incluidas."""
+        return to_dict(scenario)["scenario"]
 
     def remember_solve(self, result, scenario):
         self._last_solve = result
@@ -394,10 +404,9 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _simulation_signature(scenario) -> dict:
-        """Lo del caso que entra a la simulación: todo menos metas y tasa COP."""
+        """Lo del caso que entra a la simulación: todo menos las metas."""
         data = dict(to_dict(scenario)["scenario"])
         data.pop("goals", None)
-        data.pop("fx_spot", None)
         return data
 
     def results_are_stale(self) -> bool:
@@ -682,11 +691,10 @@ class MainWindow(QMainWindow):
         # El informe describe **la corrida**: sus supuestos, sus flujos y sus
         # cifras vienen de la copia simulada. Mezclar el caso vivo con un
         # resultado viejo imprimiría supuestos que no generaron esas cifras.
-        # Metas y tasa sí son del caso vivo: no entran a la simulación, así que
+        # Las metas sí son del caso vivo: no entran a la simulación, así que
         # agregarlas después de correr no deja el informe desactualizado.
         scenario = deepcopy(self._run_scenario or self.scenario)
         scenario.goals = deepcopy(self.scenario.goals)
-        scenario.fx_spot = self.scenario.fx_spot
         if self.results_are_stale() and QMessageBox.question(
             self,
             "El caso cambió",

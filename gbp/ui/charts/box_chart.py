@@ -20,8 +20,9 @@ from ...model.results import SimulationResult
 from ..theme import (
     BASELINE,
     INK_SOFT,
+    amount_unit,
     clean_axes,
-    format_money,
+    format_display,
     money_axis,
     series_color,
     series_text_color,
@@ -76,7 +77,7 @@ def draw_box_chart(
     # completas el umbral depende del largo de la cifra más larga: 44.011.596
     # pide casi el doble de ancho que el «44» en millones de antes.
     digits = max(
-        len(format_money(stat[k])) for stats in raw_stats for stat in stats
+        len(format_display(stat[k])) for stats in raw_stats for stat in stats
         for k in ("whishi", "whislo")
     )
     axis_fraction = box_width / max(len(years), 1)
@@ -113,7 +114,8 @@ def draw_box_chart(
 
     ax.set_xticks(positions_base)
     ax.set_xticklabels([f"Año {y}" for y in years])
-    moneda = f" ({result.currency})" if result.currency else ""
+    unidad = amount_unit(result.currency)
+    moneda = f" ({unidad})" if unidad else ""
     ax.set_ylabel(
         f"Patrimonio neto{moneda}, en moneda de hoy" if real else f"Patrimonio neto{moneda}"
     )
@@ -161,7 +163,7 @@ def draw_box_chart(
             return None
         for pos, width, name, stat in stats_by_mark:
             if abs(x_data - pos) <= width / 2 and stat["whislo"] <= y_data <= stat["whishi"]:
-                m = format_money
+                m = format_display
                 return (
                     f"{name}\n"
                     f"p90   {m(stat['whishi'])}\n"
@@ -220,7 +222,7 @@ def _label_box(
     ax.text(
         pos,
         stat["med"],
-        format_money(stat["med"]),
+        format_display(stat["med"]),
         ha="center",
         va="center",
         fontsize=style["fontsize"],
@@ -236,7 +238,7 @@ def _label_box(
         return
 
     for value, va in ((stat["whishi"], "bottom"), (stat["whislo"], "top")):
-        ax.text(pos, value, format_money(value), ha="center", va=va, fontsize=7,
+        ax.text(pos, value, format_display(value), ha="center", va=va, fontsize=7,
                 color=INK_SOFT, zorder=5)
 
     for value, va, reference in (
@@ -247,7 +249,7 @@ def _label_box(
         room_from_whisker = abs(reference - value) / span
         if room_from_median < MIN_GAP or room_from_whisker < MIN_GAP:
             continue
-        ax.text(pos, value, format_money(value), ha="center", va=va, fontsize=7,
+        ax.text(pos, value, format_display(value), ha="center", va=va, fontsize=7,
                 color=INK_SOFT, zorder=5)
 
 
@@ -267,13 +269,13 @@ def distribution_table_rows(result: SimulationResult, years: list[int], real: bo
                 {
                     "Estrategia": strategy.name,
                     "Año": year,
-                    "p10": format_money(pct[10][i]),
-                    "p25": format_money(pct[25][i]),
-                    "Mediana": format_money(pct[50][i]),
-                    "p75": format_money(pct[75][i]),
-                    "p90": format_money(pct[90][i]),
-                    "Media": format_money(means[i]),
-                    "Desv. est.": format_money(stds[i]),
+                    "p10": format_display(pct[10][i]),
+                    "p25": format_display(pct[25][i]),
+                    "Mediana": format_display(pct[50][i]),
+                    "p75": format_display(pct[75][i]),
+                    "p90": format_display(pct[90][i]),
+                    "Media": format_display(means[i]),
+                    "Desv. est.": format_display(stds[i]),
                 }
             )
     return rows

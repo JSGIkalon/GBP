@@ -21,11 +21,14 @@ rechazarse:
   porque una versión anterior de la app ignoraría el campo en silencio y
   simularía un retiro de 4 unidades donde el caso dice 4%; mejor que se niegue a
   abrirlo y pida actualizar.
-* **Esquema 5** — el caso puede llevar **metas** y una **tasa USD/COP** para la
-  vista en pesos. Las dos son opcionales y ninguna entra a la simulación: un
-  caso de esquema 4 se abre sin metas ni tasa y simula idéntico. El número sube
-  por la misma razón que en el 4: una versión anterior abriría el caso y, al
-  guardarlo, borraría las metas sin avisar.
+* **Esquema 5** — el caso puede llevar **metas**. Son opcionales y no entran a
+  la simulación: un caso de esquema 4 se abre sin metas y simula idéntico. El
+  número sube por la misma razón que en el 4: una versión anterior abriría el
+  caso y, al guardarlo, borraría las metas sin avisar.
+
+  La tasa USD/COP de la vista en pesos **no** va en el caso: es de la app (se
+  configura en Ajustes). Un caso guardado mientras la tasa vivía aquí la trae
+  como `fx_spot`, y al abrirlo se ignora.
 
 Por qué los activos propios sí van en el caso
 ---------------------------------------------
@@ -204,7 +207,6 @@ def _scenario_to_dict(scenario: Scenario) -> dict:
         "initial_value": scenario.initial_value,
         "horizon": scenario.horizon,
         "inflation": scenario.inflation,
-        "fx_spot": scenario.fx_spot,
         "goals": [_goal_to_dict(g) for g in scenario.goals],
         "strategies": [
             {
@@ -251,7 +253,6 @@ def from_dict(payload: dict) -> Scenario:
                 for s in data.get("strategies", [])
             ]
 
-        fx_spot = data.get("fx_spot")
         return Scenario(
             name=data.get("name", "Caso sin título"),
             initial_value=float(data.get("initial_value", 0.0)),
@@ -259,7 +260,6 @@ def from_dict(payload: dict) -> Scenario:
             inflation=float(data.get("inflation", 0.025)),
             strategies=strategies,
             goals=[_goal_from_dict(g) for g in data.get("goals", [])],
-            fx_spot=float(fx_spot) if fx_spot else None,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise CaseFormatError(f"El caso está dañado o incompleto: {exc}") from exc

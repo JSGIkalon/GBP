@@ -6,7 +6,7 @@ import numpy as np
 from matplotlib.ticker import MaxNLocator
 
 from ...model.results import SimulationResult
-from ..theme import clean_axes, format_money, money_axis, series_color
+from ..theme import amount_unit, clean_axes, format_display, money_axis, series_color
 
 
 def draw_debt_chart(canvas, result: SimulationResult):
@@ -33,8 +33,8 @@ def draw_debt_chart(canvas, result: SimulationResult):
         series_data.append((strategy.name, median, low, high))
 
     ax.set_xlabel("Año")
-    ax.set_ylabel(f"Saldo de la deuda ({result.currency})" if result.currency
-                  else "Saldo de la deuda")
+    unidad = amount_unit(result.currency)
+    ax.set_ylabel(f"Saldo de la deuda ({unidad})" if unidad else "Saldo de la deuda")
     ax.set_ylim(bottom=0)
     money_axis(ax)
     # Los años son enteros: sin esto el eje rotulaba 2.5, 5.0, 7.5…
@@ -62,7 +62,7 @@ def draw_debt_chart(canvas, result: SimulationResult):
             return None
         lines = [f"Año {year}"]
         for name, median, low, high in series_data:
-            m = format_money
+            m = format_display
             lines.append(
                 f"{name}: {m(median[year - 1])}  ({m(low[year - 1])}–{m(high[year - 1])})"
             )

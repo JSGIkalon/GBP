@@ -157,6 +157,59 @@ def format_money(value: float) -> str:
     return format_number(value)
 
 
+# --- Escala de lectura de los resultados ------------------------------------
+# Se elige en Ajustes. Aplica a lo que **se lee** —tablas, gráficos, tooltips e
+# informe—, nunca a los campos donde se escriben montos del caso, que siguen en
+# unidades completas: escribir en millones y leer en unidades es justo el error
+# que el aviso del capital inicial ya ataja.
+SCALES = {
+    "normal": (1.0, ""),
+    "miles": (1e3, "miles"),
+    "millones": (1e6, "millones"),
+    "miles_de_millones": (1e9, "miles de millones"),
+}
+SCALE_LABELS = {
+    "normal": "Normal (cifra completa)",
+    "miles": "Miles",
+    "millones": "Millones",
+    "miles_de_millones": "Miles de millones",
+}
+_display_scale = "normal"
+
+
+def set_display_scale(key: str) -> None:
+    global _display_scale
+    _display_scale = key if key in SCALES else "normal"
+
+
+def display_scale() -> str:
+    return _display_scale
+
+
+def format_display(value: float) -> str:
+    """Una cifra de resultado en la escala elegida en Ajustes.
+
+    En la escala normal es exactamente `format_money`. En miles o millones
+    lleva un decimal —con coma, a la colombiana— para no perder la diferencia
+    entre 1,1 y 1,2 millones: 1.154.785 en millones es «1,2».
+    """
+    divisor, _ = SCALES[_display_scale]
+    if divisor == 1.0:
+        return format_money(value)
+    scaled = value / divisor
+    if abs(scaled) < 0.05:
+        return "0"
+    return f"{scaled:,.1f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def amount_unit(currency: str = "") -> str:
+    """Rótulo de la unidad de las cifras: «millones de COP», «COP», «miles» o ""."""
+    _, name = SCALES[_display_scale]
+    if name and currency:
+        return f"{name} de {currency}"
+    return name or currency
+
+
 def use_thousands_dot(spinbox) -> None:
     """El campo muestra y acepta el punto de miles: 25.000.000.
 
@@ -174,7 +227,12 @@ def money_axis(ax, axis: str = "y") -> None:
     """Rótulos del eje con la cifra completa y punto de miles."""
     from matplotlib.ticker import FuncFormatter
 
-    formatter = FuncFormatter(lambda v, _pos: format_money(v))
+    def tick(v, _pos):
+        # Las marcas del eje son números redondos: «500.000» y no «500.000,0».
+        text = format_display(v)
+        return text[:-2] if text.endswith(",0") else text
+
+    formatter = FuncFormatter(tick)
     (ax.yaxis if axis == "y" else ax.xaxis).set_major_formatter(formatter)
 
 

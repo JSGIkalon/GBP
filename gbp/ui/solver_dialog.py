@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from ..engine.solver import CAPITAL, FLOW, GOAL, SUCCESS, Metric, Variable, solve
 from ..model.cashflows import FlowKind
-from .theme import INK, INK_SOFT, format_money
+from .theme import INK, INK_SOFT, format_display
 from .worker import start_task
 
 
@@ -129,7 +129,7 @@ class SolverDialog(QDialog):
             return f"{value:.2%} del patrimonio"
         rate = self.main.results.fx_rate or 1.0
         suffix = " COP" if self.main.results.fx_rate else ""
-        return f"{format_money(value * rate)}{suffix}"
+        return f"{format_display(value * rate)}{suffix}"
 
     def _run(self):
         strategy = self._current_strategy()
