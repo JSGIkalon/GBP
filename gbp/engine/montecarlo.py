@@ -363,7 +363,8 @@ def simulate(
     done = 0
 
     if progress:
-        progress(done, total, f"Sorteando {settings.n_paths:,} caminos de mercado…")
+        caminos = f"{settings.n_paths:,}".replace(",", ".")
+        progress(done, total, f"Sorteando {caminos} caminos de mercado…")
 
     market = draw_market(scenario, cmas, correlations, settings, cash_asset)
     done = 1

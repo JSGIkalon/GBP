@@ -503,11 +503,11 @@ def test_el_capital_avisa_cuando_faltan_los_ceros(window):
     panel.initial_value.setValue(40)
     texto = panel.initial_hint.text()
     assert "unidades" in texto
-    assert "40,000,000" in texto
+    assert "40.000.000" in texto
 
     panel.initial_value.setValue(40_000_000)
     assert "unidades" not in panel.initial_hint.text()
-    assert "40.0MM" in panel.initial_hint.text()
+    assert "40.000.000" in panel.initial_hint.text()
 
     panel.initial_value.setValue(0)
     assert "Sin capital inicial" in panel.initial_hint.text()

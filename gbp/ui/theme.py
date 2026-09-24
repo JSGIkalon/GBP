@@ -137,14 +137,45 @@ def clean_axes(ax) -> None:
     ax.tick_params(length=0)
 
 
-def format_money(value: float, decimals: int = 1) -> str:
-    """Formatea un monto en la escala más legible (MM, M o unidades)."""
-    magnitude = abs(value)
-    if magnitude >= 1_000_000:
-        return f"{value / 1_000_000:,.{decimals}f}MM"
-    if magnitude >= 1_000:
-        return f"{value / 1_000:,.0f}M"
-    return f"{value:,.0f}"
+def format_number(value: float) -> str:
+    """Entero con punto de miles, a la colombiana: 25.000.000.
+
+    Se arma a mano y no con `locale`: el locale del sistema cambia de un
+    computador a otro y el informe tiene que salir igual en todos.
+    """
+    return f"{round(value):,.0f}".replace(",", ".")
+
+
+def format_money(value: float) -> str:
+    """Monto completo, sin decimales ni abreviaturas: 25.000.000.
+
+    Antes se abreviaba a «25.0MM»; se pasó a la cifra entera a pedido de
+    Ikalon, que quiere ver todos los dígitos en la app y en el informe.
+    """
+    if abs(value) < 0.5:
+        return "0"  # sin «-0» para un redondeo de un negativo minúsculo
+    return format_number(value)
+
+
+def use_thousands_dot(spinbox) -> None:
+    """El campo muestra y acepta el punto de miles: 25.000.000.
+
+    Solo para campos **enteros** (montos, número de simulaciones). En los de
+    porcentaje el locale colombiano haría del punto un separador de miles, y
+    escribir «2.5» en la inflación daría 25 %.
+    """
+    from PySide6.QtCore import QLocale
+
+    spinbox.setLocale(QLocale(QLocale.Language.Spanish, QLocale.Country.Colombia))
+    spinbox.setGroupSeparatorShown(True)
+
+
+def money_axis(ax, axis: str = "y") -> None:
+    """Rótulos del eje con la cifra completa y punto de miles."""
+    from matplotlib.ticker import FuncFormatter
+
+    formatter = FuncFormatter(lambda v, _pos: format_money(v))
+    (ax.yaxis if axis == "y" else ax.xaxis).set_major_formatter(formatter)
 
 
 # --- Hoja de estilo de la interfaz ----------------------------------------

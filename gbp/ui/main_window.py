@@ -45,7 +45,7 @@ from .panels.scenario_panel import ScenarioPanel
 from .panels.settings_panel import SettingsPanel
 from .panels.strategies_panel import StrategiesPanel
 from .sample_case import build_sample_case, empty_case
-from .theme import INK, INK_SOFT, NAVY, STYLESHEET
+from .theme import INK, INK_SOFT, NAVY, STYLESHEET, format_number
 from .worker import start_simulation, start_task
 
 FILE_FILTER = f"Casos de GBP (*{EXTENSION});;Todos los archivos (*)"
@@ -532,7 +532,7 @@ class MainWindow(QMainWindow):
         self.export_action.setEnabled(False)
         self.progress.setVisible(True)
         self.progress.setRange(0, 0)  # indeterminado hasta el primer aviso
-        self.status.setText(f"Corriendo {self.settings.n_paths:,} simulaciones…")
+        self.status.setText(f"Corriendo {format_number(self.settings.n_paths)} simulaciones…")
 
         self._pending_scenario = deepcopy(self.scenario)
         self._thread, self._worker = start_simulation(

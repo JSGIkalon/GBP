@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from ...model.leverage import Amortization, InterestMode, LoanTerms, RateMode
 from ...model.scenario import Scenario
 from ...model.strategy import Strategy
-from ..theme import INK_SOFT, STATUS_WARNING, status_dot
+from ..theme import INK_SOFT, STATUS_WARNING, status_dot, use_thousands_dot
 
 
 class LeveragePanel(QWidget):
@@ -55,7 +55,7 @@ class LeveragePanel(QWidget):
         self.principal = QDoubleSpinBox()
         self.principal.setRange(0.0, 1e13)
         self.principal.setDecimals(0)
-        self.principal.setGroupSeparatorShown(True)
+        use_thousands_dot(self.principal)
         self.principal.setSingleStep(1_000_000)
         self.principal.valueChanged.connect(self._on_change)
         form.addRow("Monto del crédito", self.principal)

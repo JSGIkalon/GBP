@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from ...io import library
 from ...model.scenario import SimulationSettings
-from ..theme import INK, INK_SOFT
+from ..theme import INK, INK_SOFT, use_thousands_dot
 
 
 class SettingsPanel(QWidget):
@@ -49,7 +49,7 @@ class SettingsPanel(QWidget):
         self.n_paths = QSpinBox()
         self.n_paths.setRange(100, 1_000_000)
         self.n_paths.setSingleStep(1_000)
-        self.n_paths.setGroupSeparatorShown(True)
+        use_thousands_dot(self.n_paths)
         # Al terminar de editar y no en cada tecla: escribir 200000 eran seis
         # guardados a disco y seis avisos a la ventana por cifras intermedias.
         self.n_paths.editingFinished.connect(self._on_change)

@@ -22,6 +22,7 @@ from ..theme import (
     INK_SOFT,
     clean_axes,
     format_money,
+    money_axis,
     series_color,
     series_text_color,
 )
@@ -31,6 +32,9 @@ from ..theme import (
 # gráfico: con cuatro años hito y tres estrategias la fracción es ~0.048 y las
 # cinco etiquetas caben cómodas.
 MIN_WIDTH_FOR_LABELS = 0.030
+# Largo de la etiqueta con que se calibró el umbral de arriba (cifras en
+# millones sin decimales, como «44»). El umbral escala con el largo real.
+CALIBRATION_DIGITS = 3
 
 
 def _box_stats(strategy, years: list[int], real: bool) -> list[dict]:
@@ -67,14 +71,16 @@ def draw_box_chart(
     positions_base = np.arange(len(years), dtype=float)
 
     raw_stats = [_box_stats(s, years, real) for s in result.strategies]
-    peak = max(abs(stat[k]) for stats in raw_stats for stat in stats
-               for k in ("whishi", "whislo"))
-    scale = 1_000_000.0 if peak >= 1_000_000 else 1.0
-    unit = "millones" if scale > 1 else "unidades"
 
-    # ¿Caben las cinco etiquetas por caja, o solo la mediana?
+    # ¿Caben las cinco etiquetas por caja, o solo la mediana? Con cifras
+    # completas el umbral depende del largo de la cifra más larga: 44.011.596
+    # pide casi el doble de ancho que el «44» en millones de antes.
+    digits = max(
+        len(format_money(stat[k])) for stats in raw_stats for stat in stats
+        for k in ("whishi", "whislo")
+    )
     axis_fraction = box_width / max(len(years), 1)
-    label_all = axis_fraction >= MIN_WIDTH_FOR_LABELS
+    label_all = axis_fraction >= MIN_WIDTH_FOR_LABELS * digits / CALIBRATION_DIGITS
 
     stats_by_mark: list[tuple[float, float, str, dict]] = []
     boxes_to_label: list[tuple[float, dict, str]] = []
@@ -85,10 +91,7 @@ def draw_box_chart(
         color = series_color(i)
         on_fill = series_text_color(i)
 
-        stats = [
-            {**{k: v / scale for k, v in stat.items()}, "fliers": []}
-            for stat in raw_stats[i]
-        ]
+        stats = [{**stat, "fliers": []} for stat in raw_stats[i]]
 
         ax.bxp(
             stats,
@@ -110,9 +113,10 @@ def draw_box_chart(
 
     ax.set_xticks(positions_base)
     ax.set_xticklabels([f"Año {y}" for y in years])
-    ax.set_ylabel(f"Patrimonio neto ({unit}{', en moneda de hoy' if real else ''})")
+    ax.set_ylabel("Patrimonio neto, en moneda de hoy" if real else "Patrimonio neto")
     ax.axhline(0, color=BASELINE, linewidth=1, zorder=1)
     clean_axes(ax)
+    money_axis(ax)
     # Aire arriba y abajo: para las etiquetas de p10/p90 y, con dos o más
     # estrategias, para la leyenda sobre el eje.
     ax.margins(y=0.12)
@@ -122,8 +126,11 @@ def draw_box_chart(
     # definitivo: sin él no se puede saber si una caja tiene alto suficiente
     # para que sus cuartiles no se encabalguen con la mediana.
     span = float(np.ptp(ax.get_ylim())) or 1.0
+    median_style = _median_style(canvas.figure, ax, group_width / n_strategies, len(years),
+                                 digits)
     for pos, stat, on_fill, fill in boxes_to_label:
-        _label_box(ax, pos, stat, on_fill, fill, label_all and show_percentile_labels, span)
+        _label_box(ax, pos, stat, on_fill, fill, label_all and show_percentile_labels, span,
+                   median_style)
 
     if n_strategies >= 2:
         # Sin `mode="expand"`: estiraba las entradas a los extremos opuestos del
@@ -151,14 +158,15 @@ def draw_box_chart(
             return None
         for pos, width, name, stat in stats_by_mark:
             if abs(x_data - pos) <= width / 2 and stat["whislo"] <= y_data <= stat["whishi"]:
+                m = format_money
                 return (
                     f"{name}\n"
-                    f"p90   {stat['whishi']:,.1f}\n"
-                    f"p75   {stat['q3']:,.1f}\n"
-                    f"p50   {stat['med']:,.1f}\n"
-                    f"p25   {stat['q1']:,.1f}\n"
-                    f"p10   {stat['whislo']:,.1f}\n"
-                    f"media {stat['mean']:,.1f}  ·  desv. {stat['std']:,.1f}"
+                    f"p90   {m(stat['whishi'])}\n"
+                    f"p75   {m(stat['q3'])}\n"
+                    f"p50   {m(stat['med'])}\n"
+                    f"p25   {m(stat['q1'])}\n"
+                    f"p10   {m(stat['whislo'])}\n"
+                    f"media {m(stat['mean'])}  ·  desv. {m(stat['std'])}"
                 )
         return None
 
@@ -171,22 +179,49 @@ def draw_box_chart(
 MIN_GAP = 0.055
 
 
+# Ancho medio de un carácter en negrita, en fracciones del tamaño de letra.
+# Las cifras y los puntos de miles de Jost rondan 0,6 em.
+CHAR_WIDTH_EM = 0.62
+MEDIAN_FONT = 8.0
+MIN_MEDIAN_FONT = 6.5
+
+
+def _median_style(figure, ax, slot: float, n_years: int, digits: int) -> dict:
+    """Tamaño y orientación de la etiqueta de la mediana.
+
+    Con cifras completas la mediana de una caja puede ser más ancha que el
+    espacio hasta la caja vecina, y con tres estrategias las etiquetas se
+    montaban unas sobre otras. Se achica la letra hasta que quepa; si ni al
+    mínimo legible cabe, la etiqueta va **vertical** dentro de la caja, que
+    siempre es más alta que ancha en ese caso.
+    """
+    ax_width_pts = figure.get_figwidth() * 72 * ax.get_position().width
+    slot_pts = ax_width_pts * slot / max(n_years, 1)
+    fits = slot_pts * 0.92 / (digits * CHAR_WIDTH_EM)
+    if fits >= MIN_MEDIAN_FONT:
+        return {"fontsize": min(MEDIAN_FONT, fits), "rotation": 0}
+    return {"fontsize": 7.0, "rotation": 90}
+
+
 def _label_box(
-    ax, pos: float, stat: dict, on_fill: str, fill: str, label_all: bool, span: float
+    ax, pos: float, stat: dict, on_fill: str, fill: str, label_all: bool, span: float,
+    median_style: dict | None = None,
 ):
-    """Etiquetas numéricas, redondeadas y sin decimales.
+    """Etiquetas numéricas, con la cifra completa y sin decimales.
 
     La mediana y los extremos de la línea vertical van siempre. Los cuartiles se
     omiten cuando la caja es tan baja que su etiqueta chocaría con la de la
     mediana: el valor sigue estando en la tabla y al pasar el mouse.
     """
+    style = median_style or {"fontsize": MEDIAN_FONT, "rotation": 0}
     ax.text(
         pos,
         stat["med"],
-        f"{stat['med']:,.0f}",
+        format_money(stat["med"]),
         ha="center",
         va="center",
-        fontsize=8,
+        fontsize=style["fontsize"],
+        rotation=style["rotation"],
         fontweight="semibold",
         color=on_fill,
         zorder=6,
@@ -198,7 +233,7 @@ def _label_box(
         return
 
     for value, va in ((stat["whishi"], "bottom"), (stat["whislo"], "top")):
-        ax.text(pos, value, f"{value:,.0f}", ha="center", va=va, fontsize=7,
+        ax.text(pos, value, format_money(value), ha="center", va=va, fontsize=7,
                 color=INK_SOFT, zorder=5)
 
     for value, va, reference in (
@@ -209,7 +244,7 @@ def _label_box(
         room_from_whisker = abs(reference - value) / span
         if room_from_median < MIN_GAP or room_from_whisker < MIN_GAP:
             continue
-        ax.text(pos, value, f"{value:,.0f}", ha="center", va=va, fontsize=7,
+        ax.text(pos, value, format_money(value), ha="center", va=va, fontsize=7,
                 color=INK_SOFT, zorder=5)
 
 

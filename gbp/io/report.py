@@ -81,6 +81,7 @@ from ..ui.theme import (
     NEUTRAL,
     apply_matplotlib_style,
     format_money,
+    format_number,
     series_color,
 )
 
@@ -238,7 +239,7 @@ def _cover_kpis(scenario: Scenario, result: SimulationResult) -> list[tuple[str,
         (format_money(scenario.initial_value), "Capital inicial"),
         (f"{scenario.horizon} años", "Horizonte"),
         (f"{scenario.inflation:.2%}", "Inflación anual"),
-        (f"{result.n_paths:,}", "Simulaciones"),
+        (format_number(result.n_paths), "Simulaciones"),
     ]
 
 
@@ -302,7 +303,9 @@ def _cover(pdf: PdfPages, options: ReportOptions, scenario: Scenario,
 # El borde inferior deja sitio para tres cosas apiladas bajo el eje: la nota que
 # el propio gráfico escribe como `xlabel`, la nota al pie de la página —que con
 # la cita al anexo llega a dos líneas— y el pie impreso por `_new_page`.
-CHART_RECT = (0.08, 0.19, 0.86, 0.67)
+# Margen izquierdo amplio: el eje rotula cifras completas —80.000.000, y en
+# COP 400.000.000.000—, no «80» en millones como antes.
+CHART_RECT = (0.13, 0.19, 0.81, 0.67)
 # La asignación de activos rotula cada barra con el nombre de su sub-clase
 # —"Emerging Markets Sovereign Debt" y parecidos—, así que necesita un margen
 # izquierdo mucho más ancho o el texto se sale de la hoja.

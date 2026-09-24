@@ -16,7 +16,8 @@ from PySide6.QtWidgets import (
 )
 
 from ...model.scenario import Scenario
-from ..theme import INK, INK_SOFT, STATUS_WARNING, format_money, status_dot
+from ..theme import (INK, INK_SOFT, STATUS_WARNING, format_money, format_number, status_dot,
+                     use_thousands_dot)
 
 
 class ScenarioPanel(QWidget):
@@ -50,7 +51,7 @@ class ScenarioPanel(QWidget):
         self.initial_value = QDoubleSpinBox()
         self.initial_value.setRange(0.0, 1e13)
         self.initial_value.setDecimals(0)
-        self.initial_value.setGroupSeparatorShown(True)
+        use_thousands_dot(self.initial_value)
         self.initial_value.setSingleStep(1_000_000)
         self.initial_value.valueChanged.connect(self._on_change)
         form.addRow("Capital inicial", self.initial_value)
@@ -137,9 +138,9 @@ class ScenarioPanel(QWidget):
             self.initial_hint.setText(
                 status_dot(
                     STATUS_WARNING,
-                    f"Son <b>{value:,.0f}</b> — el campo está en unidades, no en "
-                    f"millones. Para {value:,.0f} millones escribe "
-                    f"<b>{value * 1_000_000:,.0f}</b>.",
+                    f"Son <b>{format_number(value)}</b> — el campo está en unidades, "
+                    f"no en millones. Para {format_number(value)} millones escribe "
+                    f"<b>{format_number(value * 1_000_000)}</b>.",
                 )
             )
         else:

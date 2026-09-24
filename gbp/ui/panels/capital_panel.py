@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from ...model.scenario import Scenario
 from ...model.strategy import Strategy
-from ..theme import INK, INK_SOFT, format_money
+from ..theme import INK, INK_SOFT, format_money, use_thousands_dot
 
 
 class CapitalPanel(QWidget):
@@ -59,7 +59,7 @@ class CapitalPanel(QWidget):
         self.amount = QDoubleSpinBox()
         self.amount.setRange(0.0, 1e13)
         self.amount.setDecimals(0)
-        self.amount.setGroupSeparatorShown(True)
+        use_thousands_dot(self.amount)
         self.amount.setSingleStep(1_000_000)
         self.amount.valueChanged.connect(self._on_change)
         form.addRow("Capital inicial propio", self.amount)

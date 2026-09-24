@@ -151,7 +151,7 @@ class CashflowPanel(QWidget):
         # Un flujo porcentual se escribe en puntos porcentuales —4.00, no 0.04—
         # porque escribir "0.04" en una columna rotulada "Monto anual" al lado de
         # otra fila que dice "1,100,000" invita a leerlo como cuatro centavos.
-        monto = f"{flow.amount * 100:,.2f} %" if flow.is_percentage else f"{flow.amount:,.0f}"
+        monto = f"{flow.amount * 100:.2f} %" if flow.is_percentage else format_money(flow.amount)
         for col, value in ((COL_AMOUNT, monto), (COL_START, str(flow.start_year)),
                            (COL_END, str(flow.end_year))):
             item = QTableWidgetItem(value)
@@ -224,7 +224,14 @@ class CashflowPanel(QWidget):
             if col == COL_NAME:
                 flow.name = item.text().strip() or flow.name
             elif col == COL_AMOUNT:
-                texto = item.text().replace(",", "").replace("%", "").strip()
+                texto = item.text().replace("%", "").strip()
+                if flow.is_percentage:
+                    # Un porcentaje admite decimales con punto o con coma: 4.5 o 4,5.
+                    texto = texto.replace(",", ".")
+                else:
+                    # Un monto es entero: puntos y comas son separadores de
+                    # miles, se escriba 1.100.000 o 1,100,000.
+                    texto = texto.replace(".", "").replace(",", "")
                 value = float(texto)
                 if value < 0:
                     raise ValueError("negativo")
