@@ -60,6 +60,10 @@ class AssetClass:
     asset_class: str | None = None
     correlation_source: str | None = None
     notes: str = ""
+    # Moneda en que el analista expresa el retorno y la volatilidad. Solo un
+    # activo propio puede estar en COP; el motor lo lleva a USD con la
+    # devaluación del caso (ver `in_usd`).
+    currency: str = "USD"
 
     def __post_init__(self) -> None:
         if not self.name or not self.name.strip():
@@ -94,7 +98,11 @@ class AssetClass:
                 )
             if self.correlation_source is not None and not self.correlation_source.strip():
                 self.correlation_source = None
+            if self.currency not in ("USD", "COP"):
+                raise ValueError(f"{self.name}: moneda desconocida {self.currency!r}.")
         else:
+            # El LTCMA está en dólares; sus clases no tienen otra moneda.
+            self.currency = "USD"
             # La clase de una clase del LTCMA se deduce de su nombre; guardarla
             # abriría la puerta a que las dos fuentes se contradigan. Lo mismo
             # para la fuente de correlación: solo tiene sentido para un activo
@@ -142,6 +150,29 @@ class AssetClass:
     def arithmetic_return(self) -> float:
         """Retorno aritmético esperado implícito en los supuestos lognormales."""
         return math.exp(self.mu_log + 0.5 * self.sigma_log**2) - 1.0
+
+    def in_usd(self, devaluation: float) -> "AssetClass":
+        """El mismo activo expresado en dólares, con una devaluación anual fija.
+
+        Si el retorno bruto en pesos es `1 + R_cop` y el peso se devalúa a ritmo
+        `d`, en dólares es `(1 + R_cop) / (1 + d)`. Dividir por una constante
+        escala el retorno bruto sin cambiar su forma, así que:
+
+        * el retorno compuesto pasa a `(1 + c) / (1 + d) − 1`, y
+        * la volatilidad a `s / (1 + d)`, con lo que `s / (1 + c)` —y por tanto
+          `sigma_log`— queda igual: la dispersión en logaritmos no cambia.
+
+        Un activo en USD se devuelve tal cual.
+        """
+        if self.currency != "COP":
+            return self
+        from dataclasses import replace
+
+        return replace(
+            self,
+            compound_return=(1.0 + self.compound_return) / (1.0 + devaluation) - 1.0,
+            volatility=self.volatility / (1.0 + devaluation),
+        )
 
     @property
     def appreciation(self) -> float:
@@ -203,6 +234,17 @@ class CMASet:
     def subset(self, names: list[str]) -> "CMASet":
         """Devuelve un CMASet con las clases indicadas, en ese orden."""
         return CMASet([self.by_name(n) for n in names])
+
+    def in_usd(self, devaluation: float | None) -> "CMASet":
+        """La librería con los activos en COP llevados a dólares.
+
+        Es lo que usa el motor: sortea, pondera y resume siempre en USD. Sin
+        activos en pesos —el caso normal— devuelve la misma librería, así que
+        nada cambia ni en el último bit.
+        """
+        if devaluation is None or not any(a.currency == "COP" for a in self.assets):
+            return self
+        return CMASet([a.in_usd(devaluation) for a in self.assets])
 
     @property
     def custom(self) -> list[AssetClass]:

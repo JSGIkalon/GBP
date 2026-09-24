@@ -65,6 +65,10 @@ class CashFlow:
     inflation_indexed: bool = True
     growth: float = 0.0
     basis: FlowBasis = FlowBasis.AMOUNT
+    # Moneda del monto. Un flujo en COP se lleva a dólares cada año con la
+    # tasa del caso (ver `schedule`). Un flujo porcentual no tiene moneda: es
+    # una fracción del patrimonio.
+    currency: str = "USD"
 
     def __post_init__(self) -> None:
         if isinstance(self.kind, str):
@@ -90,6 +94,9 @@ class CashFlow:
                 )
             self.inflation_indexed = False
             self.growth = 0.0
+            self.currency = "USD"
+        if self.currency not in ("USD", "COP"):
+            raise ValueError(f"{self.name}: moneda desconocida {self.currency!r}.")
 
     @property
     def sign(self) -> int:
@@ -99,8 +106,20 @@ class CashFlow:
     def is_percentage(self) -> bool:
         return self.basis is FlowBasis.PORTFOLIO_PCT
 
-    def schedule(self, horizon: int, inflation: float) -> np.ndarray:
-        """Vector de longitud `horizon` con el flujo firmado de cada año.
+    def schedule(self, horizon: int, inflation: float, peso=None) -> np.ndarray:
+        """Vector de longitud `horizon` con el flujo firmado de cada año, en USD.
+
+        Un flujo **en COP** se indexa con la inflación colombiana y se convierte
+        con la tasa de cada año (`peso`, un `PesoAssumptions`). El año 1 va a la
+        tasa inicial y el año `t` a `spot · (1 + devaluación)^(t−1)`, igual que
+        la indexación: el monto ingresado es el del año 1, tal cual.
+
+            USD_t = F · (1 + g_COP)^(t−1) / (spot · (1 + d)^(t−1))
+
+        Si la inflación colombiana es la de paridad, (1 + π)(1 + d) − 1, la
+        devaluación se cancela y el flujo cuesta en dólares lo mismo que uno en
+        USD indexado: es lo esperable. Se separan cuando la inflación que se
+        escribe para Colombia no es la de paridad.
 
         El índice 0 corresponde al año 1. El monto ingresado es **el del año 1**
         y se indexa desde el año 2, con factor `(1 + tasa)^(year - 1)`: un
@@ -119,10 +138,20 @@ class CashFlow:
         flows = np.zeros(horizon, dtype=float)
         if self.is_percentage:
             return flows
+        in_cop = self.currency == "COP"
+        if in_cop:
+            if peso is None:
+                raise ValueError(
+                    f"{self.name}: el flujo está en COP y el caso no tiene tasa USD/COP."
+                )
+            inflation = peso.cop_inflation(inflation)
         rate = (1.0 + (inflation if self.inflation_indexed else 0.0)) * (1.0 + self.growth) - 1.0
         last = min(self.end_year, horizon)
         for year in range(self.start_year, last + 1):
-            flows[year - 1] += self.sign * self.amount * (1.0 + rate) ** (year - 1)
+            value = self.sign * self.amount * (1.0 + rate) ** (year - 1)
+            if in_cop:
+                value /= peso.rate(year - 1)
+            flows[year - 1] += value
         return flows
 
     def rate_schedule(self, horizon: int) -> np.ndarray:
@@ -142,7 +171,7 @@ class CashFlow:
 
 
 def combined_schedule(
-    flows: list[CashFlow], horizon: int, inflation: float
+    flows: list[CashFlow], horizon: int, inflation: float, peso=None
 ) -> np.ndarray:
     """Suma de los flujos de monto fijo por año (positivo = entrada neta).
 
@@ -152,7 +181,7 @@ def combined_schedule(
     """
     total = np.zeros(horizon, dtype=float)
     for flow in flows:
-        total += flow.schedule(horizon, inflation)
+        total += flow.schedule(horizon, inflation, peso)
     return total
 
 

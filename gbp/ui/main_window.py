@@ -345,6 +345,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def _on_scenario_changed(self):
         self.strategies_panel.capital_panel.refresh_inherited()
+        # El total de flujos depende de la inflación y, con flujos en COP, de
+        # la tasa: ambas se editan en Escenario, no en el panel de flujos.
+        self.strategies_panel.cashflow_panel._update_summary()
         self._refresh_timer.start(200)
         self._schedule_session_save()
         self._apply_result_view()
@@ -352,21 +355,25 @@ class MainWindow(QMainWindow):
 
     def _apply_result_view(self, *_):
         """Moneda (de Ajustes) y metas (del caso vivo); no piden volver a simular."""
-        rate = self.settings.cop_rate
+        peso = self.scenario.peso
+        self.settings_panel.set_cop_available(peso is not None)
+        view_peso = peso if (peso is not None and self.settings.show_cop) else None
         scale_changed = display_scale() != self.settings.display_scale
         set_display_scale(self.settings.display_scale)
-        unidad = amount_unit("COP" if rate else "")
+        unidad = amount_unit("COP" if view_peso else "")
         self.currency_banner.setVisible(bool(unidad))
         if unidad:
             partes = [f"Resultados en {unidad}."]
-            if rate:
+            if view_peso:
                 partes.append(
-                    f"Tasa fija de {format_number(rate)} COP por USD; todo se simula en USD."
+                    f"Tasa inicial de {format_number(view_peso.spot)} COP por USD, con "
+                    f"devaluación de {view_peso.devaluation:.2%} anual; todo se simula en USD."
                 )
-            partes.append("Los datos del caso se ingresan en USD y en cifra completa. "
+            partes.append("Los datos del caso se ingresan en cifra completa. "
                           "Se cambia en Ajustes.")
             self.currency_banner.setText(" ".join(partes))
-        self.results.set_view(rate, self.scenario.goals, force=scale_changed)
+        self.results.set_view(view_peso, self.scenario.inflation, self.scenario.goals,
+                              force=scale_changed)
 
     # ------------------------------------------------------------------
     def open_solver(self):
@@ -722,7 +729,7 @@ class MainWindow(QMainWindow):
         options.show_percentile_labels = self.results.show_percentile_labels
         # El informe sale en la moneda que se está viendo, igual que las
         # etiquetas de percentiles.
-        options.fx_spot = self.results.fx_rate
+        options.peso = self.results.peso
         options.solve = solve
         suggested = f"{options.title} — {scenario.name}.pdf".replace("/", "-")
         path, _ = QFileDialog.getSaveFileName(

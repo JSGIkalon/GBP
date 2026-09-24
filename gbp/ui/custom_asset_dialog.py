@@ -128,6 +128,18 @@ class CustomAssetDialog(QDialog):
         numbers = QFormLayout()
         numbers.setSpacing(10)
 
+        # En qué moneda están el retorno y la volatilidad que se escriben
+        # abajo. Un activo en COP se lleva a dólares con la devaluación del caso.
+        self.currency = QComboBox()
+        self.currency.addItems(["USD", "COP"])
+        self.currency.setCurrentText(asset.currency if asset else "USD")
+        self.currency.setToolTip(
+            "COP: el retorno y la volatilidad se escriben en pesos. El motor los lleva a "
+            "dólares con la devaluación de la sección «Pesos colombianos» del caso: "
+            "rinde (1 + retorno en pesos) / (1 + devaluación) − 1."
+        )
+        numbers.addRow("Moneda", self.currency)
+
         self.compound_return = self._percent(-99.0, 200.0)
         self.compound_return.setValue((asset.compound_return * 100) if asset else 10.0)
         numbers.addRow("Retorno compuesto", self.compound_return)
@@ -232,6 +244,7 @@ class CustomAssetDialog(QDialog):
             asset_class=self.asset_class.currentText(),
             correlation_source=self._correlation_source(),
             notes=self.notes.toPlainText().strip(),
+            currency=self.currency.currentText(),
         )
 
 
@@ -247,6 +260,7 @@ def _same(a: AssetClass, b: AssetClass) -> bool:
         and abs(a.yield_ - b.yield_) < 1e-9
         and a.asset_class == b.asset_class
         and a.correlation_source == b.correlation_source
+        and a.currency == b.currency
     )
 
 
@@ -398,6 +412,7 @@ def merge_custom_assets(parent, cmas: CMASet, del_caso: list[AssetClass]) -> lis
                 existente.yield_ = del_caso_asset.yield_
                 existente.asset_class = del_caso_asset.asset_class
                 existente.correlation_source = del_caso_asset.correlation_source
+                existente.currency = del_caso_asset.currency
             if dialog.choice == ConflictDialog.ADOPTAR:
                 from ..io import library
 

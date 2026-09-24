@@ -38,7 +38,9 @@ COLUMNS = ["Nombre", "Tipo", "Base", "Monto anual", "Desde", "Hasta", "Indexa", 
 TOOLTIPS = [
     "Nombre del flujo",
     "Aporte (entra al portafolio) o retiro (sale)",
-    "Monto fijo en moneda de hoy, o porcentaje del patrimonio de cada año",
+    "Monto fijo en USD o en COP (en moneda de hoy), o porcentaje del patrimonio de "
+    "cada año. Un monto en COP se indexa con la inflación colombiana y se convierte "
+    "cada año con la tasa del caso",
     "Monto anual en moneda de hoy, o porcentaje si la base es '% patrimonio'",
     "Primer año en que ocurre",
     "Último año en que ocurre",
@@ -49,6 +51,19 @@ TOOLTIPS = [
 ]
 
 COL_NAME, COL_KIND, COL_BASIS, COL_AMOUNT, COL_START, COL_END, COL_INDEX, COL_GROWTH = range(8)
+
+# Lo que se elige en la celda «Base»: la base del flujo y su moneda.
+BASIS_OPTIONS = {
+    "monto USD": (FlowBasis.AMOUNT, "USD"),
+    "monto COP": (FlowBasis.AMOUNT, "COP"),
+    FlowBasis.PORTFOLIO_PCT.value: (FlowBasis.PORTFOLIO_PCT, "USD"),
+}
+
+
+def _basis_label(flow: CashFlow) -> str:
+    if flow.is_percentage:
+        return FlowBasis.PORTFOLIO_PCT.value
+    return f"monto {flow.currency}"
 
 
 class CashflowPanel(QWidget):
@@ -112,6 +127,7 @@ class CashflowPanel(QWidget):
         layout.addWidget(self.table, 1)
 
         self.summary = QLabel("")
+        self.summary.setWordWrap(True)
         self.summary.setStyleSheet(f"color: {INK_SOFT};")
         layout.addWidget(self.summary)
 
@@ -142,9 +158,12 @@ class CashflowPanel(QWidget):
         kind.currentTextChanged.connect(lambda text, r=row: self._set_kind(r, text))
         self.table.setCellWidget(row, COL_KIND, kind)
 
+        # La base también dice la moneda: un monto en USD, uno en COP, o una
+        # fracción del patrimonio, que no tiene moneda. Una sola celda en vez de
+        # una columna más, que la tabla ya no cabía.
         basis = QComboBox()
-        basis.addItems([FlowBasis.AMOUNT.value, FlowBasis.PORTFOLIO_PCT.value])
-        basis.setCurrentText(flow.basis.value)
+        basis.addItems(list(BASIS_OPTIONS))
+        basis.setCurrentText(_basis_label(flow))
         basis.currentTextChanged.connect(lambda text, r=row: self._set_basis(r, text))
         self.table.setCellWidget(row, COL_BASIS, basis)
 
@@ -192,14 +211,16 @@ class CashflowPanel(QWidget):
         if self._loading or row >= len(self.flows):
             return
         flow = self.flows[row]
-        nueva = FlowBasis(text)
-        if nueva is flow.basis:
+        nueva, moneda = BASIS_OPTIONS[text]
+        if (nueva, moneda) == (flow.basis, flow.currency):
             return
         flow.basis = nueva
-        # El número que había era de la otra unidad: 1,100,000 leído como
-        # fracción sería 110000000% del patrimonio, y 4% leído como monto serían
-        # cuatro pesos. Ninguna conversión es correcta, así que se arranca en
-        # cero y se vuelve a escribir.
+        flow.currency = moneda
+        # El número que había era de la otra unidad: 1.100.000 leído como
+        # fracción sería 110000000% del patrimonio, 4% leído como monto serían
+        # cuatro pesos, y 1.100.000 dólares no son 1.100.000 pesos. Ninguna
+        # conversión es la correcta, así que se arranca en cero y se vuelve a
+        # escribir.
         flow.amount = 0.0
         if flow.is_percentage:
             flow.inflation_indexed = False
@@ -280,15 +301,23 @@ class CashflowPanel(QWidget):
         if not self.flows:
             self.summary.setText("Sin flujos definidos para esta estrategia.")
             return
+        if any(f.currency == "COP" for f in self.flows) and self.scenario.peso is None:
+            self.summary.setText(
+                "Hay flujos en COP y el caso no tiene tasa USD/COP: escríbela en la "
+                "sección «Pesos colombianos» de Escenario."
+            )
+            return
         schedule = combined_schedule(
-            self.flows, self.scenario.horizon, self.scenario.inflation
+            self.flows, self.scenario.horizon, self.scenario.inflation, self.scenario.peso
         )
         inflows = float(schedule[schedule > 0].sum())
         outflows = float(-schedule[schedule < 0].sum())
         texto = (
-            f"Total del horizonte — aportes: {format_money(inflows)} · "
+            f"Total del horizonte en USD — aportes: {format_money(inflows)} · "
             f"retiros: {format_money(outflows)} · neto: {format_money(inflows - outflows)}"
         )
+        if any(f.currency == "COP" for f in self.flows):
+            texto += " (los flujos en COP, convertidos con la tasa de cada año)"
 
         # Los flujos porcentuales no tienen monto fuera de la simulación, así que
         # no se pueden sumar al total. Decirlo aparte es más honesto que dejar

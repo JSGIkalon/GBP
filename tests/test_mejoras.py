@@ -26,7 +26,7 @@ from gbp.io.report import ReportOptions, build_report
 from gbp.model.allocation import Allocation
 from gbp.model.cashflows import CashFlow, FlowKind
 from gbp.model.goals import Goal, goal_probability
-from gbp.model.scenario import Scenario, SimulationSettings
+from gbp.model.scenario import PesoAssumptions, Scenario, SimulationSettings
 from gbp.model.strategy import Strategy
 from gbp.ui.theme import format_money
 
@@ -88,16 +88,56 @@ def test_la_escala_de_lectura_divide_y_dice_su_unidad():
         set_display_scale("normal")  # estado global: no se filtra a otros tests
 
 
-def test_la_vista_en_cop_escala_montos_y_no_toca_probabilidades(simple_cmas, simple_corr):
+def test_la_vista_en_cop_convierte_con_la_tasa_de_cada_anio(simple_cmas, simple_corr):
+    peso = PesoAssumptions(spot=4_000.0, devaluation=0.03)
     usd = simulate(_caso(), simple_cmas, simple_corr, SETTINGS)
-    cop = usd.in_currency(4_000.0)
+    cop = usd.in_currency(peso, 0.03)
     for a, b in zip(usd.strategies, cop.strategies):
         assert b.success_probability == a.success_probability
-        assert b.last_year_change(True) == pytest.approx(a.last_year_change(True))
-        np.testing.assert_allclose(b.percentiles([5, 15])[50], a.percentiles([5, 15])[50] * 4_000)
-        assert b.cvar(15) == pytest.approx(a.cvar(15) * 4_000)
-        np.testing.assert_allclose(b.flow_history()["retiros"], a.flow_history()["retiros"] * 4_000)
+        # Patrimonio del año 15 a la tasa de cierre de ese año.
+        np.testing.assert_allclose(b.percentiles([15])[50], a.percentiles([15])[50] * peso.rate(15))
+        assert b.cvar(15) == pytest.approx(a.cvar(15) * peso.rate(15))
+        # Flujos del año t a la tasa con que se pagan, S_(t−1).
+        retiros = a.flow_history()["retiros"] * [peso.rate(t) for t in range(15)]
+        np.testing.assert_allclose(b.flow_history()["retiros"], retiros)
     assert cop.currency == "COP" and usd.currency == ""
+
+
+def test_un_activo_en_cop_rinde_en_dolares_neto_de_devaluacion():
+    from gbp.model.assets import AssetClass
+
+    tes = AssetClass("TES", 0.10, 0.08, origin="custom", asset_class="Renta fija",
+                     currency="COP")
+    usd = tes.in_usd(0.04)
+    assert usd.compound_return == pytest.approx(1.10 / 1.04 - 1)
+    # Dividir por una constante no cambia la dispersión en logaritmos.
+    assert usd.sigma_log == pytest.approx(tes.sigma_log)
+    assert tes.in_usd(0.0).compound_return == pytest.approx(0.10)
+
+
+def test_un_flujo_en_cop_se_indexa_en_pesos_y_se_convierte_cada_anio():
+    peso = PesoAssumptions(spot=4_000.0, devaluation=0.03, inflation=0.05)
+    gasto = CashFlow("Gasto", FlowKind.OUTFLOW, 400_000_000.0, 1, 3, currency="COP")
+    usd = -gasto.schedule(3, 0.02, peso)
+    esperado = [400e6 * 1.05 ** k / (4_000 * 1.03 ** k) for k in range(3)]
+    np.testing.assert_allclose(usd, esperado)
+    # Con la inflación de paridad cuesta en dólares lo mismo que uno en USD.
+    paridad = PesoAssumptions(spot=4_000.0, devaluation=0.03)
+    en_usd = CashFlow("G", FlowKind.OUTFLOW, 100_000.0, 1, 3)
+    np.testing.assert_allclose(
+        CashFlow("G", FlowKind.OUTFLOW, 400_000_000.0, 1, 3, currency="COP")
+        .schedule(3, 0.02, paridad),
+        en_usd.schedule(3, 0.02),
+    )
+
+
+def test_un_caso_con_cifras_en_cop_sin_tasa_no_corre(simple_cmas, simple_corr):
+    caso = _caso()
+    caso.strategies[0].cashflows[0].currency = "COP"
+    with pytest.raises(ValueError, match="tasa USD/COP"):
+        simulate(caso, simple_cmas, simple_corr, SETTINGS)
+    caso.peso = PesoAssumptions(spot=4_000.0)
+    simulate(caso, simple_cmas, simple_corr, SETTINGS)
 
 
 def test_una_meta_se_cumple_segun_el_patrimonio_de_su_anio(simple_cmas, simple_corr):
@@ -162,15 +202,16 @@ def test_el_solver_avisa_si_el_objetivo_es_inalcanzable(simple_cmas, simple_corr
     assert r.value is None and "cero" in r.message
 
 
-def test_el_esquema_5_guarda_metas_y_el_4_abre_igual(simple_cmas, simple_corr):
-    caso = _caso(goals=[Goal("Legado", 5_000_000.0)])
+def test_el_esquema_6_guarda_metas_pesos_y_monedas_y_el_4_abre_igual(simple_cmas, simple_corr):
+    caso = _caso(goals=[Goal("Legado", 5_000_000.0)],
+                 peso=PesoAssumptions(spot=4_150.5, devaluation=0.03))
+    caso.strategies[0].cashflows[0].currency = "COP"
     guardado = json.loads(json.dumps(to_dict(caso)))
-    # La tasa COP es de la app, no del caso: no se guarda, y si un caso viejo
-    # la trae, se ignora sin romper.
-    assert "fx_spot" not in guardado["scenario"]
-    guardado["scenario"]["fx_spot"] = 4_150.5
+    guardado["scenario"]["fx_spot"] = 1.0  # de una versión intermedia: se ignora
     vuelta = from_dict(guardado)
     assert vuelta.goals[0].name == "Legado" and vuelta.goals[0].year is None
+    assert vuelta.peso.spot == 4_150.5 and vuelta.peso.inflation is None
+    assert vuelta.strategies[0].cashflows[0].currency == "COP"
 
     viejo = to_dict(_caso())
     viejo["schema"] = 4
@@ -192,8 +233,9 @@ def test_el_informe_solo_suma_laminas_si_se_piden(tmp_path, simple_cmas, simple_
     base = _paginas(build_report(tmp_path / "base.pdf", ReportOptions(), caso, result, SETTINGS))
 
     # En COP es el mismo documento: mismas páginas, otras cifras.
-    cop = build_report(tmp_path / "cop.pdf", ReportOptions(fx_spot=4_000.0), caso, result,
-                       SETTINGS)
+    cop = build_report(tmp_path / "cop.pdf",
+                       ReportOptions(peso=PesoAssumptions(spot=4_000.0, devaluation=0.03)),
+                       caso, result, SETTINGS)
     assert _paginas(cop) == base
 
     con_meta = _caso(goals=[Goal("Legado", 1_000_000.0)])

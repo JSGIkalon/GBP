@@ -118,9 +118,13 @@ class ReportOptions:
     include_goals: bool = True
     include_solve: bool = False
     solve: object | None = None
-    # Vista en pesos: la tasa fija por la que se multiplican todas las cifras
-    # en dinero. `None` es el informe de siempre, en la moneda de los supuestos.
-    fx_spot: float | None = None
+    # Vista en pesos: los supuestos del peso del caso, con los que se convierte
+    # cada cifra con la tasa de su año. `None` es el informe de siempre, en USD.
+    peso: object | None = None
+
+    @property
+    def fx_spot(self) -> float | None:
+        return self.peso.spot if self.peso is not None else None
     # Lo decide la casilla de la pantalla, no la ventana de exportación: el
     # informe sale con las mismas etiquetas de percentiles que se estaban viendo.
     show_percentile_labels: bool = True
@@ -246,11 +250,18 @@ def _wrap(text: str, width: int) -> list[str]:
 def _money(value: float, options: ReportOptions) -> str:
     """Un monto **del caso** (capital, flujo, crédito) en la moneda del informe.
 
-    Los resultados ya llegan convertidos; los inputs del caso se definen en la
-    moneda de los supuestos y se convierten aquí, con la misma tasa, para que
-    el documento no mezcle dos monedas.
+    Los resultados ya llegan convertidos; los inputs del caso se definen en USD
+    y valen hoy, así que en la vista COP se convierten con la tasa inicial para
+    que el documento no mezcle dos monedas.
     """
     return format_display(value * (options.fx_spot or 1.0))
+
+
+def _flow_amount(flow, options: ReportOptions) -> str:
+    """El monto de un flujo de monto fijo, con su moneda si no es la del informe."""
+    if flow.currency == "COP":
+        return f"{format_display(flow.amount)} COP"
+    return _money(flow.amount, options)
 
 
 def _currency_note(options: ReportOptions) -> str:
@@ -259,10 +270,11 @@ def _currency_note(options: ReportOptions) -> str:
     escala = amount_unit("")
     if escala:
         partes.append(f"Cifras en {escala}.")
-    if options.fx_spot:
+    if options.peso is not None:
         partes.append(
-            f"Cifras en pesos colombianos (COP) a una tasa fija de "
-            f"{format_number(options.fx_spot)} COP por USD; el caso se proyecta en USD."
+            f"Cifras en pesos colombianos (COP), convertidas con la tasa de cada año: "
+            f"{format_number(options.peso.spot)} COP por USD hoy, con devaluación de "
+            f"{options.peso.devaluation:.2%} anual. El caso se proyecta en USD."
         )
     return " ".join(partes)
 
@@ -949,7 +961,7 @@ def _flow_text(flow, options: ReportOptions) -> str:
         )
     return (
         f"{flow.kind.value.capitalize()} · {flow.name}: "
-        f"{_money(flow.amount, options)} al año, años "
+        f"{_flow_amount(flow, options)} al año, años "
         f"{flow.start_year}–{flow.end_year}"
         f"{', indexado a inflación' if flow.inflation_indexed else ''}"
         f"{f', crecimiento real {flow.growth:.2%}' if flow.growth else ''}"
@@ -1015,8 +1027,19 @@ def _write_case_inputs(col: _Column, scenario: Scenario, options: ReportOptions)
         ("Inflación anual", f"{scenario.inflation:.2%}"),
     ):
         col.pair(label, value)
-    if options.fx_spot:
-        col.pair("Moneda", f"COP a {format_number(options.fx_spot)} por USD, tasa fija")
+    # Los supuestos del peso son del caso: se documentan siempre que existan,
+    # se vea o no el informe en COP, porque pueden haber movido cifras.
+    peso = scenario.peso
+    if peso is not None:
+        inflacion = (
+            f"{peso.inflation:.2%}" if peso.inflation is not None
+            else f"{peso.cop_inflation(scenario.inflation):.2%} (por paridad)"
+        )
+        col.pair("Tasa USD/COP", f"{format_number(peso.spot)} hoy")
+        col.pair("Devaluación", f"{peso.devaluation:.2%} anual, camino fijo")
+        col.pair("Inflación Colombia", inflacion)
+    if options.peso is not None:
+        col.pair("Moneda", "COP, con la tasa de cada año")
 
     for i, strategy in enumerate(scenario.strategies):
         # La estrategia se mide entera y se pide sitio de una vez: partida entre
@@ -1047,7 +1070,8 @@ def _write_custom_assets(col: _Column, propios: list):
         "Estas clases de activo no están en el LTCMA: sus supuestos los fijó quien "
         "preparó este informe. Sus correlaciones se derivan del promedio de la "
         "clase de activo indicada, salvo que el activo esté anclado a uno solo "
-        "de la librería, como se indica abajo. Los valores están en dólares.",
+        "de la librería, como se indica abajo. Los valores están en la moneda de "
+        "cada activo; uno en COP se lleva a dólares con la devaluación del caso.",
         color=INK_SOFT, indent=0.0,
     )
     col.gap(0.02)
@@ -1058,7 +1082,8 @@ def _write_custom_assets(col: _Column, propios: list):
             else f"promedio de {asset.asset_class}"
         )
         col.write(
-            f"Clase: {asset.asset_class} · retorno compuesto {asset.compound_return:.2%}"
+            f"Clase: {asset.asset_class} · en {asset.currency}"
+            f" · retorno compuesto {asset.compound_return:.2%}"
             f" · volatilidad {asset.volatility:.2%} · yield {asset.yield_:.2%}"
             f" · correlación: {correlacion}"
         )
@@ -1438,8 +1463,8 @@ def build_report(
     # Las metas se miden sobre la corrida original; la conversión a COP es
     # solo de lectura y no cambia ninguna probabilidad.
     base_result = result
-    if options.fx_spot:
-        result = result.in_currency(options.fx_spot)
+    if options.peso is not None:
+        result = result.in_currency(options.peso, scenario.inflation)
     nota_moneda = _currency_note(options)
     years = settings.milestones_within(result.horizon)
     moneda = f"Valores nominales. {nota_moneda}".strip()

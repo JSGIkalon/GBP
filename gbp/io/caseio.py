@@ -26,9 +26,13 @@ rechazarse:
   número sube por la misma razón que en el 4: una versión anterior abriría el
   caso y, al guardarlo, borraría las metas sin avisar.
 
-  La tasa USD/COP de la vista en pesos **no** va en el caso: es de la app (se
-  configura en Ajustes). Un caso guardado mientras la tasa vivía aquí la trae
-  como `fx_spot`, y al abrirlo se ignora.
+* **Esquema 6** — **pesos colombianos**: los supuestos del peso del caso
+  (`peso`: tasa inicial, devaluación e inflación colombiana), la moneda de cada
+  flujo (`currency`) y la de cada activo propio embebido. Cambian cifras de la
+  simulación, así que una versión anterior que los ignorara simularía un gasto
+  de 400.000.000 de pesos como 400.000.000 de dólares: mejor que se niegue a
+  abrir el caso. Un caso de esquema 5 o anterior abre todo en USD, que es lo
+  que era. Un `fx_spot` suelto, de una versión intermedia, se ignora.
 
 Por qué los activos propios sí van en el caso
 ---------------------------------------------
@@ -50,10 +54,10 @@ from ..model.allocation import Allocation
 from ..model.cashflows import CashFlow, FlowBasis, FlowKind
 from ..model.goals import Goal, GoalPriority
 from ..model.leverage import Amortization, InterestMode, LoanTerms, RateMode
-from ..model.scenario import Scenario
+from ..model.scenario import PesoAssumptions, Scenario
 from ..model.strategy import Strategy
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 EXTENSION = ".gbp.json"
 
 
@@ -103,6 +107,7 @@ def _flow_to_dict(flow: CashFlow) -> dict:
         "inflation_indexed": flow.inflation_indexed,
         "growth": flow.growth,
         "basis": flow.basis.value,
+        "currency": flow.currency,
     }
 
 
@@ -116,6 +121,7 @@ def _flow_from_dict(payload: dict) -> CashFlow:
         inflation_indexed=bool(payload.get("inflation_indexed", True)),
         growth=float(payload.get("growth", 0.0)),
         basis=FlowBasis(payload.get("basis", FlowBasis.AMOUNT.value)),
+        currency=payload.get("currency", "USD"),
     )
 
 
@@ -201,12 +207,31 @@ def _goal_from_dict(payload: dict) -> Goal:
     )
 
 
+def _peso_from_dict(payload: dict | None) -> PesoAssumptions | None:
+    if not payload:
+        return None
+    inflation = payload.get("inflation")
+    return PesoAssumptions(
+        spot=float(payload["spot"]),
+        devaluation=float(payload.get("devaluation", 0.0)),
+        inflation=float(inflation) if inflation is not None else None,
+    )
+
+
 def _scenario_to_dict(scenario: Scenario) -> dict:
     return {
         "name": scenario.name,
         "initial_value": scenario.initial_value,
         "horizon": scenario.horizon,
         "inflation": scenario.inflation,
+        "peso": (
+            {
+                "spot": scenario.peso.spot,
+                "devaluation": scenario.peso.devaluation,
+                "inflation": scenario.peso.inflation,
+            }
+            if scenario.peso else None
+        ),
         "goals": [_goal_to_dict(g) for g in scenario.goals],
         "strategies": [
             {
@@ -260,6 +285,7 @@ def from_dict(payload: dict) -> Scenario:
             inflation=float(data.get("inflation", 0.025)),
             strategies=strategies,
             goals=[_goal_from_dict(g) for g in data.get("goals", [])],
+            peso=_peso_from_dict(data.get("peso")),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise CaseFormatError(f"El caso está dañado o incompleto: {exc}") from exc

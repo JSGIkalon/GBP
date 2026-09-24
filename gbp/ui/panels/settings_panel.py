@@ -6,7 +6,6 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
     QLabel,
     QLineEdit,
@@ -90,29 +89,18 @@ class SettingsPanel(QWidget):
         self.scale.currentIndexChanged.connect(self._on_view_change)
         cop_form.addRow("Ver las cifras en", self.scale)
 
-        self.fx_spot = QDoubleSpinBox()
-        self.fx_spot.setRange(0.0, 1_000_000.0)
-        self.fx_spot.setDecimals(2)
-        self.fx_spot.setSingleStep(10.0)
-        self.fx_spot.setSpecialValueText("Sin tasa")
-        self.fx_spot.setSuffix(" COP por USD")
-        # La conversión se aplica al terminar de editar; la casilla se habilita
-        # en cuanto hay una tasa, aunque se haya puesto con las flechas.
-        self.fx_spot.editingFinished.connect(self._on_view_change)
-        self.fx_spot.valueChanged.connect(lambda *_: self._update_cop_enabled())
-        cop_form.addRow("Tasa USD/COP", self.fx_spot)
-
         self.show_cop = QCheckBox("Ver los resultados en COP")
         self.show_cop.toggled.connect(self._on_view_change)
         cop_form.addRow("", self.show_cop)
         layout.addLayout(cop_form)
 
         cop_note = QLabel(
-            "Solo cambia cómo se leen los resultados, en la app y en el PDF: la escala "
+            "Solo cambian cómo se leen los resultados, en la app y en el PDF: la escala "
             "divide cada cifra (25.000.000 en millones es 25,0) y la vista en COP la "
-            "multiplica por esta tasa fija. Ninguna de las dos cambia la simulación ni "
-            "una probabilidad. Los datos del caso se siguen ingresando en USD y en "
-            "cifra completa."
+            "convierte con la tasa de cada año, que sale de la tasa inicial y la "
+            "devaluación de la sección «Pesos colombianos» de Escenario. Ninguna de las "
+            "dos cambia la simulación ni una probabilidad. Los datos del caso se siguen "
+            "ingresando en cifra completa."
         )
         cop_note.setWordWrap(True)
         cop_note.setStyleSheet(f"color: {INK_SOFT};")
@@ -135,35 +123,33 @@ class SettingsPanel(QWidget):
         self._loading = True
         self.n_paths.setValue(settings.n_paths)
         self.milestones.setText(", ".join(str(y) for y in settings.milestone_years))
-        self.fx_spot.setValue(settings.fx_spot or 0.0)
         self.show_cop.setChecked(settings.show_cop)
         index = self.scale.findData(settings.display_scale)
         self.scale.setCurrentIndex(max(index, 0))
-        self._update_cop_enabled()
         self._loading = False
         self.path_label.setText(f"Se guarda en {library.settings_path()}")
 
-    def _update_cop_enabled(self):
-        has_rate = self.fx_spot.value() > 0
-        self.show_cop.setEnabled(has_rate)
+    def set_cop_available(self, available: bool):
+        """La casilla solo se puede usar si el caso abierto tiene tasa USD/COP.
+
+        La preferencia se conserva aunque se apague: al abrir otro caso con
+        tasa, la vista en COP vuelve sola.
+        """
+        self.show_cop.setEnabled(available)
         self.show_cop.setToolTip(
-            "" if has_rate else "Escribe primero una tasa USD/COP."
+            "" if available else
+            "El caso no tiene tasa USD/COP: escríbela en la sección «Pesos "
+            "colombianos» de Escenario."
         )
 
     def _on_view_change(self, *_):
-        """Tasa o casilla: solo cambian la lectura, no la próxima corrida."""
+        """Casilla o escala: solo cambian la lectura, no la próxima corrida."""
         if self._loading:
             return
-        self._update_cop_enabled()
-        spot = self.fx_spot.value() or None
-        # Sin tasa no hay vista en COP, aunque la casilla hubiera quedado marcada.
-        show = self.show_cop.isChecked() and spot is not None
+        show = self.show_cop.isChecked()
         scale = self.scale.currentData() or "normal"
-        if (spot, show, scale) == (
-            self.settings.fx_spot, self.settings.show_cop, self.settings.display_scale
-        ):
+        if (show, scale) == (self.settings.show_cop, self.settings.display_scale):
             return
-        self.settings.fx_spot = spot
         self.settings.show_cop = show
         self.settings.display_scale = scale
         try:

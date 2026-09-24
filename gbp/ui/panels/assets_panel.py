@@ -168,7 +168,12 @@ class AssetsPanel(QWidget):
 
     def _set_row(self, row: int, asset: AssetClass):
         name_item = QTableWidgetItem(asset.name)
-        origen = QTableWidgetItem("Propio" if asset.is_custom else "LTCMA")
+        # Un activo propio en pesos lo dice aquí: sus cifras de retorno y
+        # volatilidad son en COP, no comparables a ojo con las del LTCMA.
+        origen = QTableWidgetItem(
+            ("Propio · COP" if asset.currency == "COP" else "Propio")
+            if asset.is_custom else "LTCMA"
+        )
         # La clase de una del LTCMA se deduce del nombre: se muestra en gris para
         # que se entienda el mecanismo sin confundirla con una declarada.
         clase = QTableWidgetItem(

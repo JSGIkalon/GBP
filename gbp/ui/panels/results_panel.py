@@ -88,6 +88,9 @@ class ResultsPanel(QTabWidget):
         self.base_result: SimulationResult | None = None
         self.result: SimulationResult | None = None
         self.fx_rate: float | None = None
+        self.peso = None
+        self.inflation = 0.0
+        self._view_key = None
         self.goals: list = []
         self.settings = SimulationSettings()
         self.years: list[int] = []
@@ -276,14 +279,20 @@ class ResultsPanel(QTabWidget):
         self.years = settings.milestones_within(horizon)
         self._render()
 
-    def set_view(self, fx_rate: float | None, goals: list, force: bool = False):
+    def set_view(self, peso, inflation: float, goals: list, force: bool = False):
         """Moneda de lectura y metas del caso, que no requieren volver a simular.
 
-        Las dos son del caso vivo y no de la corrida: cambiar la tasa o agregar
-        una meta se ve de inmediato sobre los mismos caminos.
+        `peso` es `None` para ver en USD, o los supuestos del peso para ver en
+        COP. Cambiarlos o agregar una meta se ve de inmediato sobre los mismos
+        caminos.
         """
-        changed_rate = fx_rate != self.fx_rate
-        self.fx_rate = fx_rate
+        key = None if peso is None else (peso.spot, peso.devaluation,
+                                         peso.cop_inflation(inflation))
+        changed_rate = key != self._view_key
+        self._view_key = key
+        self.peso = peso
+        self.inflation = inflation
+        self.fx_rate = peso.spot if peso is not None else None
         self.goals = goals
         self._sync_goals_tab()
         if self.base_result is None:
@@ -302,8 +311,8 @@ class ResultsPanel(QTabWidget):
 
     def _render(self):
         result = self.base_result
-        if self.fx_rate:
-            result = result.in_currency(self.fx_rate)
+        if self.peso is not None:
+            result = result.in_currency(self.peso, self.inflation)
         self.result = result
 
         self._draw_distributions()
@@ -332,15 +341,15 @@ class ResultsPanel(QTabWidget):
         for i in range(len(columns)):
             header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
         header.setStretchLastSection(True)
-        rate = result.fx_rate
         rows = []
         for goal in self.goals:
+            # La meta se define en USD; en la vista COP se muestra convertida
+            # con la tasa de su año, en la misma unidad que el patrimonio.
+            factor = result.money_factor(goal.resolved_year(result.horizon), goal.real)
             row = {
                 "Meta": goal.name,
                 "Año": "final" if goal.year is None else goal.year,
-                # La meta se define en la moneda del caso; en la vista COP se
-                # muestra convertida con la misma tasa que el resto.
-                "Monto": format_display(goal.amount * rate),
+                "Monto": format_display(goal.amount * factor),
                 "Unidad": "moneda de hoy" if goal.real else "nominal",
                 "Prioridad": goal.priority.value,
             }

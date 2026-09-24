@@ -416,6 +416,49 @@ Activos propios: la app deja de servir solo para patrimonios en EE.UU.
   camino es dejar elegir un activo de referencia concreto — la regla está
   aislada en `extend_correlations`, así que no obliga a rehacer nada.
 
+## Sesión 19 — 23 sep 2026
+
+Pesos colombianos en el modelo, y lectura de las cifras en Ajustes.
+
+**Hecho**
+
+- **Activos propios en COP.** El analista marca la moneda en la ventana del
+  activo y escribe el retorno y la volatilidad en pesos. El motor los lleva a
+  dólares con la devaluación esperada del caso: retorno
+  `(1 + c) / (1 + d) − 1` y volatilidad `s / (1 + d)`, con la misma
+  `sigma_log`. Se hace con `CMASet.in_usd`, antes del sorteo.
+- **Flujos en COP.** La celda «Base» ofrece monto USD, monto COP o % del
+  patrimonio. Un flujo en COP se indexa con la inflación colombiana y se
+  convierte cada año con `S_(t−1)`. Con la inflación de paridad cuesta lo mismo
+  que el flujo equivalente en USD.
+- **Supuestos del peso en Escenario**, sección «Pesos colombianos (opcional)»:
+  tasa inicial, devaluación esperada e inflación Colombia (o «por paridad»).
+  Viajan con el caso porque cambian cifras. Un caso con cifras en pesos y sin
+  tasa no corre y dice qué falta.
+- **Vista en COP con la tasa de cada año**, `S_t = S_0 (1 + d)^t`, en vez de una
+  tasa fija. La moneda de hoy en COP descuenta la inflación colombiana. La
+  casilla vive en **Ajustes**.
+- **Escala de lectura en Ajustes**: normal, miles, millones o miles de
+  millones. Divide lo que se lee y lo rotula; los campos de entrada siguen en
+  cifra completa.
+- **Unidad a la vista.** Con COP o una escala distinta de la normal, un aviso
+  fijo sobre los resultados y cada columna o fila de montos dicen la unidad
+  («millones de COP»). El PDF lo repite en la portada y en las notas.
+- **Esquema de caso 6.** Un caso anterior abre todo en USD.
+- Tests nuevos: conversión de un activo en COP, flujo en COP (y paridad), caso
+  sin tasa, vista con la tasa de cada año, escala, esquema 6. 143 en verde. La
+  huella del motor no cambió.
+
+**Decisiones y hallazgos**
+
+- **Devaluación esperada fija, sin riesgo cambiario**, por decisión de Ikalon.
+  Simular el peso (volatilidad y correlación con los mercados) queda como
+  siguiente paso posible.
+- **Agregar un activo nuevo al caso cambia los caminos de todas las
+  estrategias**, porque el sorteo se hace sobre la unión de activos. Ya era
+  así. Se nota al comparar una corrida con activo COP y otra sin él: las
+  estrategias que no lo usan también se mueven unas décimas.
+
 ## Sesión 18 — 23 sep 2026
 
 Metas, solver y vista en COP, las tres opcionales; cifras completas; auditoría

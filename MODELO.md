@@ -30,7 +30,7 @@ Las figuras de `docs/img/` las genera [tools/make_modelo_figures.py](tools/make_
 10. [Los supuestos resumen](#10-los-supuestos-resumen)
 11. [Metas](#11-metas)
 12. [Solver](#12-solver)
-13. [Vista en COP](#13-vista-en-cop)
+13. [Pesos colombianos](#13-pesos-colombianos)
 14. [Activos fuera del LTCMA](#14-activos-fuera-del-ltcma)
 15. [Qué no hace el modelo](#15-qué-no-hace-el-modelo)
 16. [Validación contra la fuente](#16-validación-contra-la-fuente)
@@ -544,20 +544,76 @@ La lámina «Solver» del PDF es opcional y solo se ofrece si el caso no cambió
 
 ---
 
-## 13. Vista en COP
+## 13. Pesos colombianos
 
-Opcional. Con una tasa fija $S$ (COP por USD) escrita en el escenario, la casilla «Ver en COP» multiplica **toda cifra en dinero** por $S$: patrimonio, percentiles, media, desviación, CVaR, flujos, deuda, montos de metas y los montos del caso en el informe.
+El portafolio se proyecta **siempre en USD**. Los pesos entran por tres puertas, las tres opcionales:
+
+- **Activos propios en COP.**
+- **Flujos en COP.**
+- **La vista en COP.**
+
+Las tres usan los supuestos del peso del caso, que se escriben en Escenario ([scenario.py](gbp/model/scenario.py), `PesoAssumptions`):
+
+| Supuesto | Símbolo | Qué es |
+|---|---|---|
+| Tasa inicial | $S_0$ | COP por USD hoy |
+| Devaluación esperada | $d$ | ritmo anual al que se devalúa el peso |
+| Inflación Colombia | $\pi_{\text{COP}}$ | indexa los flujos en COP; si se deja «por paridad», $\pi_{\text{COP}} = (1+\pi)(1+d) - 1$ |
+
+La tasa sigue un **camino fijo**, el mismo en todos los caminos simulados:
 
 $$
-W^{\text{COP}}_{n,t} = S \cdot W_{n,t}
+S_t = S_0\,(1 + d)^t
 $$
 
-**Qué no cambia:**
+Ajusta retornos y montos por la devaluación **esperada**, pero **no agrega riesgo cambiario**: el peso no tiene volatilidad ni correlación con los mercados. Estos supuestos viajan con el caso, como la inflación, porque cambian cifras de la simulación.
 
-- **Probabilidades, porcentajes y Sharpe.** Son invariantes a la escala: $\mathbb{1}[S\,W > 0] = \mathbb{1}[W > 0]$ y $\mathbb{1}[S\,W \ge S\,M] = \mathbb{1}[W \ge M]$.
-- **Los percentiles.** El percentil de lo convertido es el percentil convertido: la escala positiva preserva el orden.
+### Un activo en COP
 
-Es una **vista, no un modelo de la moneda**: no simula devaluación ni correlaciona el peso con los activos. El caso se sigue definiendo en USD, en `SimulationResult.in_currency`, y el informe lo dice en la portada y en cada nota al pie.
+El analista escribe el retorno $c$ y la volatilidad $s$ **en pesos**. En dólares, el retorno bruto de cada año es el de pesos dividido por la devaluación del año:
+
+$$
+1 + R^{\text{USD}} = \frac{1 + R^{\text{COP}}}{1 + d}
+\qquad\Longrightarrow\qquad
+c^{\text{USD}} = \frac{1 + c}{1 + d} - 1,\qquad s^{\text{USD}} = \frac{s}{1+d}
+$$
+
+Dividir por una constante escala el retorno bruto sin cambiar su forma. Por eso $s/(1+c)$, y con ella $\sigma$ (§3), queda igual: la dispersión en logaritmos no cambia y solo baja la media, $\mu^{\text{USD}} = \mu - \ln(1+d)$. El motor hace esta conversión antes de todo (`CMASet.in_usd`), así que el sorteo, la ponderación y los supuestos resumen trabajan ya en dólares.
+
+*Ejemplo:* un TES al 10,5% en pesos, con devaluación de 3%, rinde $1{,}105/1{,}03 - 1 = 7{,}28\%$ en dólares.
+
+### Un flujo en COP
+
+El monto $F$ está en pesos del año 1. Se indexa con la inflación colombiana y se convierte con la tasa del año en que se paga:
+
+$$
+F^{\text{USD}}_t = \frac{F\,(1 + g_{\text{COP}})^{t-1}}{S_{t-1}}
+= \frac{F}{S_0}\left(\frac{1 + g_{\text{COP}}}{1+d}\right)^{t-1}
+$$
+
+con $1 + g_{\text{COP}} = (1 + \pi_{\text{COP}})(1 + g_{\text{real}})$ si el flujo está indexado.
+
+**Con la inflación de paridad**, la devaluación se cancela: un gasto de 4.510 millones de pesos a 4.100 cuesta exactamente lo mismo en dólares que 1.100.000 USD indexados, año por año. Las dos monedas se separan cuando la inflación colombiana que se escribe no es la de paridad. Por ejemplo, con $\pi_{\text{COP}}$ por encima de la paridad, el gasto en pesos se encarece en dólares cada año.
+
+Un flujo porcentual no tiene moneda: es una fracción del patrimonio.
+
+### La vista en COP
+
+Se activa en Ajustes y es solo de lectura (`SimulationResult.in_currency`). Cada cifra se convierte con la tasa del momento al que corresponde:
+
+| Cifra | Tasa |
+|---|---|
+| Patrimonio, activos y deuda al cierre del año $t$ | $S_t$ |
+| Flujos del año $t$ | $S_{t-1}$, la misma del motor: un gasto en pesos se lee tal como se escribió |
+| Capital inicial, venta forzada máxima | $S_0$ |
+
+La moneda de hoy en COP descuenta la inflación colombiana, $W^{\text{COP,real}}_t = S_t W_t / (1 + \pi_{\text{COP}})^t$.
+
+**Las probabilidades no cambian**: cada factor de conversión es positivo, así que no cambia el signo del patrimonio ni el orden entre caminos.
+
+### Escala de lectura
+
+En Ajustes también se elige ver las cifras en unidades, miles, millones o miles de millones. Divide lo que se lee —tablas, gráficos, informe— y cada rótulo lo dice. Nunca toca los campos donde se escriben montos, que siguen en cifra completa.
 
 ---
 
@@ -604,7 +660,7 @@ Para las clases pobladas $\lambda = 1$ y no cambia nada. Es honesto además de c
 ### Límites de esta derivación
 
 - **La granularidad de la clase manda.** Dos activos propios de la misma clase quedan correlacionados a $\lambda^2\operatorname{var}(p)$, muy parecidos entre sí. Si TES y CDT se declaran en la misma clase, el modelo los trata casi como el mismo activo.
-- **La moneda no está modelada.** El término $\varepsilon$ recoge juntos el país, el emisor y la moneda. Pero la exposición cambiaria de varios activos locales contra una matriz en dólares es **común** a todos ellos, no idiosincrática. Por eso se **subestima la correlación entre activos locales** en una devaluación.
+- **El riesgo cambiario no está modelado.** Un activo marcado en COP descuenta la devaluación *esperada* (§13), pero su volatilidad en pesos se lleva a dólares sin sumarle la del peso. El término $\varepsilon$ recoge juntos el país, el emisor y la moneda, y la exposición cambiaria de varios activos locales, que es **común** a todos ellos, se trata como idiosincrática. Por eso se **subestima la correlación entre activos locales** en una devaluación.
 - **El tope de 0,95 es un parámetro elegido.** Resuelve la singularidad, pero no sale de ningún dato.
 
 ---
@@ -616,7 +672,7 @@ Para las clases pobladas $\lambda = 1$ y no cambia nada. Es honesto además de c
 - **Sin comisiones de gestión.** Es una de las dos causas conocidas de la diferencia contra J.P. Morgan (§16).
 - **Paso anual.** No hay rebalanceo intra-anual ni secuencia de retornos dentro del año.
 - **Metas sin buckets.** Las metas se miden sobre el único portafolio de cada estrategia. No hay sub-portafolios separados por meta con su propia asignación.
-- **La moneda no se simula.** La vista en COP es una tasa fija (§13).
+- **El peso sigue un camino fijo.** Activos y flujos en COP usan la devaluación esperada, sin volatilidad del peso ni su correlación con los mercados (§13). La devaluación que llega junto con una caída del mercado, que es cuando más duele, no está en el modelo.
 - **Sin datos históricos.** No hay backtest, rolling returns ni drawdowns históricos: todo sale de los supuestos prospectivos.
 - **El yield es informativo** y no afecta la proyección.
 
@@ -764,7 +820,8 @@ Qué pasa desde «Correr simulación» hasta el PDF:
 | 2 | flujos, crédito y capital por estrategia |
 | 3 | activos propios embebidos en el caso |
 | 4 | flujos en % del patrimonio (`basis`) |
-| 5 | metas y tasa USD/COP; un caso de esquema 4 abre sin ellas y simula idéntico |
+| 5 | metas; un caso de esquema 4 abre sin ellas y simula idéntico |
+| 6 | pesos colombianos: supuestos del peso, moneda de cada flujo y de cada activo propio; un caso anterior abre todo en USD |
 
 Un caso de un esquema **más nuevo** que la app se rechaza con el mensaje «actualiza GBP»: abrirlo y guardarlo borraría lo que la versión vieja no entiende.
 
@@ -860,6 +917,7 @@ La suite se depuró de 171 a unos 100 tests. Salieron los redundantes y los que 
 - **Todas las estrategias comparten los mismos sorteos**: las diferencias son de la estrategia, y el solver puede buscar por bisección.
 - **Cada año tiene el mismo orden**: desembolso, aportes, mercado, crédito, retiros (primero los %, sobre el patrimonio neto) y control de LTV. Un patrimonio agotado devenga a la tasa de caja.
 - **Nada se supone sobre la forma de la distribución**: percentiles, éxito, CVaR y metas salen de contar caminos. El éxito es estricto: un camino falla si toca cero en cualquier año.
-- **Metas, solver y COP son opcionales** y no cambian la simulación: se miden, se buscan o se convierten sobre los mismos caminos.
+- **Metas, solver, vista en COP y escala son opcionales** y no cambian la simulación: se miden, se buscan o se convierten sobre los mismos caminos.
+- **Activos y flujos en COP sí la cambian.** Se llevan a dólares con una devaluación esperada fija, sin riesgo cambiario. Sin nada en pesos, el motor da las mismas cifras bit a bit.
 - **Pre-tax, sin comisiones, con correlaciones constantes.** Las colas extremas salen algo optimistas por construcción.
 - **La arquitectura va en una dirección** (`ui → io → engine → model`). La simulación, el PDF y el solver corren en hilos. Una huella bit a bit protege las cifras de cualquier optimización.

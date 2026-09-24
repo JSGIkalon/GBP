@@ -254,37 +254,57 @@ class SimulationResult:
     # (USD). `in_currency` lo marca, y así cada gráfico y tabla puede decir en
     # qué moneda está sin que nadie se lo pase aparte.
     currency: str = ""
+    # Tasa inicial de la vista en COP (1 en USD). La de cada año está en
+    # `fx_path`; esta es la que convierte cifras de hoy, como el capital.
     fx_rate: float = 1.0
+    fx_path: np.ndarray | None = None
+    fx_real_path: np.ndarray | None = None
 
-    def in_currency(self, rate: float, currency: str = "COP") -> "SimulationResult":
-        """La misma corrida con todos los montos multiplicados por una tasa fija.
+    def in_currency(self, peso, usd_inflation: float, currency: str = "COP") -> "SimulationResult":
+        """La misma corrida vista en pesos, con la tasa de cada año.
 
-        Es una **vista**: no se vuelve a simular nada. Con una tasa fija, toda
-        cifra en dinero se multiplica por el mismo número, así que
-        probabilidades, porcentajes y Sharpe no cambian —no dependen de la
-        escala— y los percentiles convertidos son los percentiles de lo
-        convertido. Se devuelven copias nuevas, con cachés vacías, para que
-        nada de la vista en USD se cuele en la de COP ni al revés.
+        Es una **vista**: no se vuelve a simular nada. Cada cifra se convierte
+        con la tasa del momento al que corresponde:
+
+        * el patrimonio, los activos y la deuda al cierre del año `t`, con
+          `S_t = spot · (1 + d)^t`;
+        * los flujos del año `t`, con `S_(t−1)`, la misma tasa con que el motor
+          convierte un flujo en COP —así un gasto en pesos se lee en pesos tal
+          como se escribió—;
+        * el capital inicial y la venta forzada máxima, con la tasa inicial.
+
+        La moneda de hoy en COP descuenta la inflación colombiana del caso.
+
+        Las probabilidades no cambian: la conversión de cada año es un factor
+        positivo, que no cambia el signo del patrimonio ni el orden entre
+        caminos. Se devuelven copias nuevas, con cachés vacías, para que nada de
+        la vista en USD se cuele en la de COP ni al revés.
         """
+        years = np.arange(1, self.horizon + 1)
+        close = peso.spot * (1.0 + peso.devaluation) ** years
+        during = peso.spot * (1.0 + peso.devaluation) ** (years - 1)
+        deflator = (1.0 + peso.cop_inflation(usd_inflation)) ** years
+
         def convert(s: StrategyResult) -> StrategyResult:
-            wealth = s.wealth * rate
+            wealth = s.wealth * close
             # Sin crédito el motor comparte un solo arreglo para activos y
             # patrimonio; la vista lo sigue compartiendo en vez de duplicarlo.
-            assets = wealth if np.shares_memory(s.wealth, s.assets) else s.assets * rate
+            assets = wealth if np.shares_memory(s.wealth, s.assets) else s.assets * close
             return StrategyResult(
                 name=s.name,
                 wealth=wealth,
                 assets=assets,
-                debt=s.debt * rate,
+                debt=s.debt * close,
                 summary=s.summary,
                 margin_calls=s.margin_calls,
-                forced_sales=s.forced_sales * rate,
-                inflation_factors=s.inflation_factors,
-                contributions=s.contributions * rate,
-                withdrawals=s.withdrawals * rate,
-                initial_value=s.initial_value * rate,
+                forced_sales=s.forced_sales * peso.spot,
+                inflation_factors=deflator,
+                contributions=s.contributions * during,
+                withdrawals=s.withdrawals * during,
+                initial_value=s.initial_value * peso.spot,
             )
 
+        usd_factors = (1.0 + usd_inflation) ** years
         return SimulationResult(
             strategies=[convert(s) for s in self.strategies],
             horizon=self.horizon,
@@ -292,8 +312,22 @@ class SimulationResult:
             seed=self.seed,
             scenario_name=self.scenario_name,
             currency=currency,
-            fx_rate=rate,
+            fx_rate=peso.spot,
+            fx_path=close,
+            fx_real_path=close * usd_factors / deflator,
         )
+
+    def money_factor(self, year: int, real: bool) -> float:
+        """Por cuánto se multiplica un monto USD del año `year` para esta vista.
+
+        Sirve para lo que se define fuera de la corrida —el monto de una meta—
+        y tiene que leerse en la misma unidad que el patrimonio: nominal con la
+        tasa de ese año, en moneda de hoy con la tasa y las dos inflaciones.
+        """
+        if self.fx_path is None:
+            return 1.0
+        path = self.fx_real_path if real else self.fx_path
+        return float(path[min(max(year, 1), self.horizon) - 1])
 
     def __iter__(self):
         return iter(self.strategies)

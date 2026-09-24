@@ -138,6 +138,7 @@ def asset_from_dict(entry: dict) -> AssetClass:
         asset_class=asset_class,
         correlation_source=entry.get("correlation_source"),
         notes=str(entry.get("notes", "")),
+        currency=entry.get("currency", "USD") if origin == ORIGIN_CUSTOM else "USD",
     )
 
 
@@ -160,6 +161,8 @@ def asset_to_dict(asset: AssetClass, with_origin: bool = True) -> dict:
         payload["asset_class"] = asset.asset_class
         if asset.correlation_source:
             payload["correlation_source"] = asset.correlation_source
+        if asset.currency != "USD":
+            payload["currency"] = asset.currency
     if asset.notes:
         payload["notes"] = asset.notes
     return payload
@@ -238,12 +241,10 @@ def load_settings() -> SimulationSettings:
         if payload.get("schema", 1) < 2 and milestones == LEGACY_MILESTONES:
             milestones = list(defaults.milestone_years)
 
-        fx_spot = payload.get("fx_spot")
         return SimulationSettings(
             n_paths=int(payload.get("n_paths", defaults.n_paths)),
             seed=defaults.seed,
             milestone_years=milestones,
-            fx_spot=float(fx_spot) if fx_spot else None,
             show_cop=bool(payload.get("show_cop", False)),
             display_scale=str(payload.get("display_scale", "normal")),
         )

@@ -28,10 +28,8 @@ class SimulationSettings:
     n_paths: int = 10_000
     seed: int | None = 42
     milestone_years: list[int] = field(default_factory=lambda: [5, 10, 15, 20])
-    # Vista en pesos, opcional. Es de la app y no del caso: la tasa es un dato
-    # de mercado, el mismo para todos los clientes, y ver o no en COP es una
-    # preferencia de lectura. Ninguna de las dos entra a la simulación.
-    fx_spot: float | None = None
+    # Preferencias de lectura: ver en COP (con los supuestos del peso del caso)
+    # y la escala de las cifras. Ninguna entra a la simulación.
     show_cop: bool = False
     # Escala en que se leen los resultados: "normal", "miles", "millones" o
     # "miles_de_millones". Solo cambia cómo se muestran las cifras.
@@ -42,13 +40,6 @@ class SimulationSettings:
             raise ValueError("Se necesitan al menos 100 simulaciones.")
         if self.n_paths > 1_000_000:
             raise ValueError("El máximo razonable es 1.000.000 de simulaciones.")
-        if self.fx_spot is not None and self.fx_spot <= 0:
-            self.fx_spot = None
-
-    @property
-    def cop_rate(self) -> float | None:
-        """La tasa a aplicar, o `None` si la vista en COP no está activa."""
-        return self.fx_spot if (self.show_cop and self.fx_spot) else None
 
     def milestones_within(self, horizon: int) -> list[int]:
         """Años hito que caben en el horizonte, sin repetidos y ordenados.
@@ -63,6 +54,43 @@ class SimulationSettings:
         """
         years = sorted({y for y in self.milestone_years if 1 <= y <= horizon})
         return years or [horizon]
+
+
+@dataclass
+class PesoAssumptions:
+    """Supuestos del peso colombiano, para activos y flujos en COP.
+
+    El portafolio se proyecta en USD. Un activo o un flujo en pesos se lleva a
+    dólares con una tasa que se devalúa a ritmo fijo:
+
+        S_t = spot · (1 + devaluación)^t        (COP por USD al cierre del año t)
+
+    Es una trayectoria **determinística**: ajusta retornos y montos por la
+    devaluación esperada, pero no agrega riesgo cambiario. Viaja con el caso
+    porque cambia cifras de la simulación, igual que la inflación.
+    """
+
+    spot: float
+    devaluation: float = 0.0
+    # Indexa los flujos en COP. Si falta, se usa la paridad: inflación USD
+    # compuesta con la devaluación, que deja un flujo en pesos indexado igual
+    # de caro en dólares que uno en dólares indexado.
+    inflation: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.spot <= 0:
+            raise ValueError("La tasa USD/COP debe ser positiva.")
+        if self.devaluation <= -1:
+            raise ValueError("La devaluación anual debe ser mayor a -100%.")
+
+    def rate(self, year: int) -> float:
+        """COP por USD al cierre del año `year` (año 0 = hoy)."""
+        return self.spot * (1.0 + self.devaluation) ** year
+
+    def cop_inflation(self, usd_inflation: float) -> float:
+        if self.inflation is not None:
+            return self.inflation
+        return (1.0 + usd_inflation) * (1.0 + self.devaluation) - 1.0
 
 
 @dataclass
@@ -81,6 +109,9 @@ class Scenario:
     # Opcionales: un caso sin metas se comporta exactamente como antes de que
     # existieran. No entran a la simulación.
     goals: list[Goal] = field(default_factory=list)
+    # Opcional: solo hace falta si el caso tiene activos o flujos en pesos, o
+    # para ver los resultados en COP.
+    peso: PesoAssumptions | None = None
 
     def __post_init__(self) -> None:
         if self.horizon < 1:
@@ -139,6 +170,28 @@ class Scenario:
                     f"{strategy.loan.start_year}, después del final del horizonte "
                     f"({self.horizon} años)."
                 )
+
+        if self.peso is None:
+            en_pesos = self.cop_items(cmas)
+            if en_pesos:
+                raise ValueError(
+                    "El caso tiene cifras en pesos —" + ", ".join(en_pesos) + "— pero no "
+                    "tiene tasa USD/COP. Escríbela en la sección «Pesos colombianos» de "
+                    "Escenario."
+                )
+
+    def cop_items(self, cmas: CMASet) -> list[str]:
+        """Activos y flujos del caso que están en pesos, por nombre."""
+        items: list[str] = []
+        for name in self.asset_names:
+            try:
+                if cmas.by_name(name).currency == "COP":
+                    items.append(name)
+            except KeyError:
+                continue
+        for strategy in self.strategies:
+            items += [f.name for f in strategy.cashflows if f.currency == "COP"]
+        return items
 
     @property
     def asset_names(self) -> list[str]:

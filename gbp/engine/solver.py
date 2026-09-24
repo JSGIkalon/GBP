@@ -36,7 +36,7 @@ from ..model.cashflows import FlowKind
 from ..model.correlation import CorrelationMatrix
 from ..model.goals import goal_probability
 from ..model.scenario import Scenario, SimulationSettings
-from .montecarlo import draw_market, simulate_strategy
+from .montecarlo import draw_market, simulate_strategy, usd_cmas
 
 # Topes de la búsqueda. Un monto que no cruza el objetivo ni en billones no lo
 # va a cruzar nunca; un porcentaje no puede pasar del 100% del patrimonio.
@@ -157,6 +157,7 @@ def solve(
 
     if progress:
         progress(0, "Sorteando los caminos de mercado…")
+    cmas = usd_cmas(scenario, cmas)
     market = draw_market(scenario, cmas, correlations, settings)
     cache: dict[float, float] = {}
 
@@ -166,7 +167,8 @@ def solve(
         trial = deepcopy(strategy)
         _set(trial, variable, value)
         result = simulate_strategy(
-            trial, scenario.horizon, scenario.inflation, scenario.initial_value, cmas, market
+            trial, scenario.horizon, scenario.inflation, scenario.initial_value, cmas, market,
+            peso=scenario.peso,
         )
         p = result.success_probability if goal is None else goal_probability(result, goal)
         cache[value] = p

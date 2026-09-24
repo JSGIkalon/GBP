@@ -166,6 +166,11 @@ def _market_names(scenario: Scenario, cmas: CMASet, correlations: CorrelationMat
     return names
 
 
+def usd_cmas(scenario: Scenario, cmas: CMASet) -> CMASet:
+    """La librería con los activos en COP del caso llevados a USD."""
+    return cmas.in_usd(scenario.peso.devaluation if scenario.peso else None)
+
+
 def draw_market(
     scenario: Scenario,
     cmas: CMASet,
@@ -197,8 +202,12 @@ def simulate_strategy(
     cmas: CMASet,
     market: Market,
     on_year: Callable[[], None] | None = None,
+    peso=None,
 ) -> StrategyResult:
     """Proyecta una estrategia sobre caminos de mercado ya sorteados.
+
+    `cmas` tiene que ser la librería **ya llevada a USD** (`CMASet.in_usd`), la
+    misma con la que se sorteó `market`; `peso` convierte los flujos en COP.
 
     Pública porque el solver la llama muchas veces sobre el mismo `market`,
     cambiando solo una cifra de la estrategia.
@@ -224,7 +233,7 @@ def simulate_strategy(
         cash_rate = np.ascontiguousarray(cash_rate.T)
 
     inflows, outflows = _split_by_kind(
-        strategy.cashflows, lambda f: f.schedule(horizon, inflation), horizon
+        strategy.cashflows, lambda f: f.schedule(horizon, inflation, peso), horizon
     )
     flow_rates = combined_rate_schedule(strategy.cashflows, horizon)
     # Las dos mitades del flujo porcentual por separado, solo para el registro:
@@ -352,6 +361,9 @@ def simulate(
     """Corre la simulación para todas las estrategias del escenario."""
     settings = settings or SimulationSettings()
     scenario.validate(cmas)
+    # Los activos en pesos pasan a dólares antes de todo: el sorteo, la
+    # ponderación y los supuestos resumen trabajan siempre en USD.
+    cmas = usd_cmas(scenario, cmas)
     _market_names(scenario, cmas, correlations, cash_asset)  # falla antes de sortear
 
     # El progreso se cuenta en pasos de **año simulado**, no de estrategia: con
@@ -390,6 +402,7 @@ def simulate(
                 cmas,
                 market,
                 on_year=tick if progress else None,
+                peso=scenario.peso,
             )
         )
 

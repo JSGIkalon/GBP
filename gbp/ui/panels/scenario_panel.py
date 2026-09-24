@@ -1,4 +1,4 @@
-"""Panel del escenario: nombre, capital, horizonte, inflación y metas."""
+"""Panel del escenario: nombre, capital, horizonte, inflación, pesos y metas."""
 
 from __future__ import annotations
 
@@ -15,8 +15,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...model.scenario import Scenario
+from ...model.scenario import PesoAssumptions, Scenario
 from ..theme import (
+    BLUE_MID,
     INK,
     INK_SOFT,
     STATUS_WARNING,
@@ -26,6 +27,9 @@ from ..theme import (
     use_thousands_dot,
 )
 from .goals_panel import GoalsPanel
+
+# Valor del campo de inflación colombiana que significa «por paridad».
+PARITY_SENTINEL = -10.0
 
 
 class ScenarioPanel(QWidget):
@@ -91,11 +95,61 @@ class ScenarioPanel(QWidget):
         note = QLabel(
             "La inflación indexa los flujos marcados como tales y permite ver los "
             "resultados en poder adquisitivo de hoy. Los montos del caso se ingresan en "
-            "USD; la vista en COP se activa en Ajustes."
+            "USD, salvo los flujos y activos marcados en COP; la vista en COP se activa "
+            "en Ajustes."
         )
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {INK_SOFT};")
         layout.addWidget(note)
+
+        # --- Pesos colombianos (opcional) ------------------------------------
+        layout.addSpacing(8)
+        peso_title = QLabel("PESOS COLOMBIANOS (OPCIONAL)")
+        peso_title.setStyleSheet(f"color: {BLUE_MID}; font-weight: 600; letter-spacing: 2px;")
+        layout.addWidget(peso_title)
+        peso_form = QFormLayout()
+        peso_form.setSpacing(10)
+
+        self.fx_spot = QDoubleSpinBox()
+        self.fx_spot.setRange(0.0, 1_000_000.0)
+        self.fx_spot.setDecimals(2)
+        self.fx_spot.setSingleStep(10.0)
+        self.fx_spot.setSpecialValueText("Sin tasa")
+        self.fx_spot.setSuffix(" COP por USD")
+        self.fx_spot.valueChanged.connect(self._on_change)
+        peso_form.addRow("Tasa USD/COP inicial", self.fx_spot)
+
+        self.devaluation = QDoubleSpinBox()
+        self.devaluation.setRange(-50.0, 100.0)
+        self.devaluation.setDecimals(2)
+        self.devaluation.setSingleStep(0.25)
+        self.devaluation.setSuffix(" % anual")
+        self.devaluation.valueChanged.connect(self._on_change)
+        peso_form.addRow("Devaluación esperada", self.devaluation)
+
+        # En el mínimo del rango el campo dice «por paridad»: la inflación
+        # colombiana se deduce de la de USD y la devaluación. Así no hace falta
+        # una casilla aparte para «no la sé».
+        self.cop_inflation = QDoubleSpinBox()
+        self.cop_inflation.setRange(PARITY_SENTINEL, 100.0)
+        self.cop_inflation.setDecimals(2)
+        self.cop_inflation.setSingleStep(0.25)
+        self.cop_inflation.setSuffix(" %")
+        self.cop_inflation.setSpecialValueText("Por paridad")
+        self.cop_inflation.valueChanged.connect(self._on_change)
+        peso_form.addRow("Inflación Colombia", self.cop_inflation)
+        layout.addLayout(peso_form)
+
+        peso_note = QLabel(
+            "Solo hace falta si hay activos o flujos en COP, o para ver los resultados "
+            "en pesos. Un activo en COP rinde en dólares su retorno en pesos menos la "
+            "devaluación; un flujo en COP se indexa con la inflación colombiana y se "
+            "convierte cada año con la tasa devaluada. La tasa sigue un camino fijo: no "
+            "agrega riesgo cambiario."
+        )
+        peso_note.setWordWrap(True)
+        peso_note.setStyleSheet(f"color: {INK_SOFT};")
+        layout.addWidget(peso_note)
 
         layout.addSpacing(8)
         self.goals_panel = GoalsPanel(scenario.goals)
@@ -132,6 +186,13 @@ class ScenarioPanel(QWidget):
         self.initial_value.setValue(scenario.initial_value)
         self.horizon.setValue(scenario.horizon)
         self.inflation.setValue(scenario.inflation * 100.0)
+        peso = scenario.peso
+        self.fx_spot.setValue(peso.spot if peso else 0.0)
+        self.devaluation.setValue(peso.devaluation * 100.0 if peso else 0.0)
+        self.cop_inflation.setValue(
+            peso.inflation * 100.0 if (peso and peso.inflation is not None) else PARITY_SENTINEL
+        )
+        self._update_peso_enabled()
         self.goals_panel.reload(scenario.goals)
         self._loading = False
         self._update_initial_hint()
@@ -170,5 +231,21 @@ class ScenarioPanel(QWidget):
         self.scenario.initial_value = self.initial_value.value()
         self.scenario.horizon = self.horizon.value()
         self.scenario.inflation = self.inflation.value() / 100.0
+        spot = self.fx_spot.value()
+        if spot > 0:
+            inflation = self.cop_inflation.value()
+            self.scenario.peso = PesoAssumptions(
+                spot=spot,
+                devaluation=self.devaluation.value() / 100.0,
+                inflation=None if inflation <= PARITY_SENTINEL else inflation / 100.0,
+            )
+        else:
+            self.scenario.peso = None
+        self._update_peso_enabled()
         self._update_initial_hint()
         self.changed.emit()
+
+    def _update_peso_enabled(self):
+        has_rate = self.fx_spot.value() > 0
+        self.devaluation.setEnabled(has_rate)
+        self.cop_inflation.setEnabled(has_rate)
