@@ -1,3 +1,3 @@
-"""GBP — Simulador de proyección patrimonial (Goals-Based Planning)."""
+﻿"""GBP â€” Simulador de proyecciÃ³n patrimonial (Goals-Based Planning)."""
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"

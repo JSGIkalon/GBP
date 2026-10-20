@@ -3,67 +3,67 @@
   "cases": {
     "ejemplo": {
       "Portafolio actual": {
-        "wealth": "bdba83d98ea26ddb14b3",
+        "wealth": "ea2db1bf26762bd5ee17",
         "debt": "76fc10913b2e3625acb6",
         "contributions": "76fc10913b2e3625acb6",
         "withdrawals": "90c98a481e02245457fa",
         "forced_sales": "151ff79f29e96d211576",
-        "success": 0.8853333333333333,
-        "median_final": 44011596.35285772,
+        "success": 0.9056666666666666,
+        "median_final": 54022789.13817537,
         "margin_calls": "151ff79f29e96d211576"
       },
       "Balanceado con 30% PI": {
-        "wealth": "3dce9c9232ae0b5d1950",
+        "wealth": "5febbaf60f1cdd0f8829",
         "debt": "76fc10913b2e3625acb6",
         "contributions": "76fc10913b2e3625acb6",
         "withdrawals": "90c98a481e02245457fa",
         "forced_sales": "151ff79f29e96d211576",
-        "success": 0.9223333333333333,
-        "median_final": 45168458.04236417,
+        "success": 0.9476666666666667,
+        "median_final": 59049376.75644251,
         "margin_calls": "151ff79f29e96d211576"
       },
       "Growth con 20% PI": {
-        "wealth": "fcb97c92147c8718a3f8",
+        "wealth": "db00df32ccfbc7ea993c",
         "debt": "76fc10913b2e3625acb6",
         "contributions": "76fc10913b2e3625acb6",
         "withdrawals": "90c98a481e02245457fa",
         "forced_sales": "151ff79f29e96d211576",
-        "success": 0.8703333333333333,
-        "median_final": 59709715.71387456,
+        "success": 0.8893333333333333,
+        "median_final": 74233197.69664425,
         "margin_calls": "151ff79f29e96d211576"
       }
     },
     "apalancado": {
       "Cr\u00e9dito 1": {
-        "wealth": "c3f2ba6acaef6d7eda10",
-        "debt": "4a0b4176163d56a5bb1e",
+        "wealth": "dbbf43cfaee10d929cad",
+        "debt": "6c7b23af79e4a922fee6",
         "contributions": "baf1862a3e57a773bc10",
         "withdrawals": "8a47424cdfd249f2aeaa",
-        "forced_sales": "b990cf8afde834cf8bc0",
-        "success": 0.751,
-        "median_final": 17201252.828245535,
-        "margin_calls": "66132794b2ffe0b14af1"
+        "forced_sales": "948a84741ad354753f3e",
+        "success": 0.7746666666666666,
+        "median_final": 21233983.512277175,
+        "margin_calls": "1fdab095e350f404aeaf"
       },
       "Cr\u00e9dito 2": {
-        "wealth": "e1900abd4f99426d5b8d",
-        "debt": "f7a8f820015f58c49017",
+        "wealth": "e6ad93234980fee0be63",
+        "debt": "7b440b3904575fa8e6a3",
         "contributions": "baf1862a3e57a773bc10",
         "withdrawals": "8a47424cdfd249f2aeaa",
-        "forced_sales": "f3afe27ff876f183ea2a",
-        "success": 0.745,
-        "median_final": 14565835.285294214,
-        "margin_calls": "0bacc6fb1837dfeb4dbe"
+        "forced_sales": "d8bf2c92ee8e10173cf7",
+        "success": 0.7743333333333333,
+        "median_final": 18308743.85932726,
+        "margin_calls": "2ecbcca72da1c93c7830"
       }
     },
     "porcentual": {
       "Endowment": {
-        "wealth": "019c254c94ca0b632957",
+        "wealth": "8a2f13bb5fd944c0ec31",
         "debt": "1358f4ce65f0d1ed482d",
-        "contributions": "ef32aeb9065548da3473",
-        "withdrawals": "3be6bd52666d809448c8",
+        "contributions": "deac9cfb1dc1db1c1526",
+        "withdrawals": "f4e5cb60db3fc4d97ebf",
         "forced_sales": "151ff79f29e96d211576",
         "success": 1.0,
-        "median_final": 31811247.921330586,
+        "median_final": 35641061.81423956,
         "margin_calls": "151ff79f29e96d211576"
       }
     }

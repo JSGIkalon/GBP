@@ -94,7 +94,7 @@ Cada clase de activo se describe con tres números, más la matriz de correlaci�
 | **Volatilidad** $s_i$ | La desviación estándar anual del retorno |
 | **Yield** | La parte del retorno que llega como flujo y no como apreciación |
 
-**Vienen del LTCMA 2026 de J.P. Morgan**: la tabla en USD, con 59 clases de activo y su matriz de correlación completa. Viajan embebidos en la app, en `gbp/data/`.
+**Vienen del LTCMA 2027 de J.P. Morgan**: la tabla en USD, con 60 clases de activo y su matriz de correlación completa. Viajan embebidos en la app, en `gbp/data/`.
 
 **No se editan desde la interfaz.** Se ven en modo lectura y se actualizan reimportando el documento con `tools/import_ltcma.py`. La razón es de gobierno, no técnica: son supuestos institucionales, y si cada usuario los edita, dos personas con el mismo caso obtienen proyecciones distintas sin que nada lo deje ver. La excepción son los activos propios (§14).
 
@@ -914,7 +914,7 @@ La suite se depuró de 171 a unos 100 tests. Salieron los redundantes y los que 
 ## Resumen en una página
 
 - **Lognormales correlacionadas, paso anual**, 10.000 caminos con semilla 42. $\mu = \ln(1+c)$, y $\sigma$ por punto fijo para que la conversión sea reversible.
-- **Los supuestos vienen del LTCMA 2026**: 59 clases, con la matriz reparada a PSD (ajuste máximo 0,008). No se editan desde la interfaz.
+- **Los supuestos vienen del LTCMA 2027**: 60 clases, con la matriz reparada a PSD cuando hace falta (autovalor mínimo publicado de −0,017). No se editan desde la interfaz.
 - **La correlación define el riesgo del portafolio**, porque el portafolio se agrega después del sorteo con rebalanceo anual.
 - **Todas las estrategias comparten los mismos sorteos**: las diferencias son de la estrategia, y el solver puede buscar por bisección.
 - **Cada año tiene el mismo orden**: desembolso, aportes, mercado, crédito, retiros (primero los %, sobre el patrimonio neto) y control de LTV. Un patrimonio agotado devenga a la tasa de caja.

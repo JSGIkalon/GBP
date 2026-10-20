@@ -35,7 +35,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "gbp" / "data"
 
 # La tabla en USD se repite en dos páginas; basta con la primera que esté completa.
-CANDIDATE_PAGES = (81, 82)
+# El reporte completo la trae en 81-82 (base 0); el resumido de 2027, en 67-68.
+CANDIDATE_PAGES = (67, 68, 81, 82)
 
 NUMBER = re.compile(r"-?\d+\.\d{2}")
 # Encabezados y notas que aparecen intercalados entre las filas de la tabla.
@@ -54,7 +55,8 @@ def clean(text: str) -> str:
     text = unicodedata.normalize("NFKC", text)
     text = text.replace("\u2013", "-").replace("\u2019", "'")
     # pypdf a veces deja una "Â" suelta donde había un espacio duro.
-    return text.replace("Â", " ")
+    # El reporte resumido trae un carácter de reemplazo entre "Equity" y "Value Factor".
+    return text.replace("Â", " ").replace("�", " ")
 
 
 def parse_rows(page_text: str) -> list[tuple[str, list[float], list[float]]]:
@@ -133,7 +135,11 @@ def main() -> None:
         )
 
     DATA.mkdir(parents=True, exist_ok=True)
-    source = f"J.P. Morgan 2026 Long-Term Capital Market Assumptions (USD) — {pdf_path.name}"
+    year = re.search(r"(20\d\d) Long-\s*Term Capital Market", clean(reader.pages[3].extract_text() or ""))
+    source = (
+        f"J.P. Morgan {year.group(1) if year else '2027'} Long-Term Capital Market "
+        f"Assumptions (USD) — {pdf_path.name}"
+    )
 
     (DATA / "correlations.json").write_text(
         json.dumps(

@@ -901,3 +901,24 @@ Reestructuración del informe PDF y retiro del stress test.
   daño es con pérdida, así que no se puede revertir. Para editar texto, la
   herramienta de edición; nunca un reemplazo por consola.
 
+
+
+## LTCMA 2027 — 20 oct 2026
+
+Versión 0.3.1. Se reemplazan los supuestos del LTCMA 2026 por los de la edición 2027.
+
+**Hecho**
+
+- `tools/import_ltcma.py` lee también el reporte resumido (tabla USD en las páginas
+  68-69) y toma el año de la edición del propio PDF.
+- `gbp/data/ltcma_usd.json` y `correlations.json` regenerados: **60 clases**. Suben
+  los retornos de renta fija (p. ej. Aggregate 4,8 % → 5,6 %), de renta variable
+  de EE. UU. (Large Cap 6,7 % → 7,5 %) y de hedge funds; bajan EM Equity
+  (7,8 % → 7,1 %) y Private Equity (10,2 % → 9,8 %). Subió la volatilidad de la
+  renta variable estadounidense.
+- Clases nuevas: Global Core Real Estate y Americas Core Real Estate. Sale U.S.
+  Value-Added Real Estate, que el LTCMA ya no publica.
+- La librería del usuario se actualiza sola la primera vez que abre una edición
+  nueva: cambian retorno y volatilidad de las clases del LTCMA, se conservan sus
+  yields y notas, y **los activos propios no se tocan**.
+- Huella del motor regenerada: los supuestos de entrada cambiaron.

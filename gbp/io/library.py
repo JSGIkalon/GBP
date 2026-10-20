@@ -78,6 +78,47 @@ def seed_cmas() -> CMASet:
     )
 
 
+def ltcma_source() -> str | None:
+    """Edición del LTCMA embebido en esta versión de la app (su campo `source`)."""
+    path = data_dir() / "ltcma_usd.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("source")
+    except (OSError, ValueError):
+        return None
+
+
+def refresh_ltcma(cmas: CMASet, conservar: tuple[str, ...] = ()) -> CMASet:
+    """Pone al día los supuestos del LTCMA de una librería ya sembrada.
+
+    Cuando sale una edición nueva, la librería guardada sigue con los números de
+    la anterior. Aquí se reemplazan retorno y volatilidad de las clases del LTCMA,
+    se conserva el yield y las notas que el analista haya puesto, se agregan las
+    clases nuevas y se retiran las que la edición ya no publica. **Los activos
+    propios no se tocan**: ni sus supuestos ni su correlación de origen.
+    """
+    nuevo = seed_cmas()
+    previos = {a.name: a for a in cmas.ltcma}
+    refrescado = CMASet([])
+    for asset in nuevo:
+        anterior = previos.get(asset.name)
+        if anterior is not None:
+            asset.yield_ = anterior.yield_
+            asset.notes = anterior.notes
+        refrescado.add(asset)
+    for propio in cmas.custom:
+        if propio.name in refrescado.names:
+            propio.name = f"{propio.name} (propio)"
+        refrescado.add(propio)
+    # Un activo propio con la clase dañada se lee degradado a LTCMA, pero no lo es:
+    # no se descarta por no figurar en la edición nueva.
+    for name in conservar:
+        if name in previos and name not in refrescado.names:
+            refrescado.add(previos[name])
+    return refrescado
+
+
 def library_path() -> Path:
     return app_data_dir() / LIBRARY_FILE
 
@@ -92,7 +133,22 @@ def load_cmas() -> CMASet:
 
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        return CMASet([asset_from_dict(entry) for entry in payload.get("assets", [])])
+        cmas = CMASet([asset_from_dict(entry) for entry in payload.get("assets", [])])
+        fuente = ltcma_source()
+        if fuente and payload.get("ltcma_source") != fuente and seed_cmas().names:
+            declarados = tuple(
+                e["name"] for e in payload.get("assets", []) if e.get("origin") == ORIGIN_CUSTOM
+            )
+            cmas = refresh_ltcma(cmas, conservar=declarados)
+            try:
+                save_cmas(cmas)
+            except OSError:
+                pass
+            LOAD_WARNINGS.append(
+                "Los supuestos del LTCMA se actualizaron a la edición más reciente "
+                f"({fuente.split(' — ')[0]}). Los activos propios no se modificaron."
+            )
+        return cmas
     except (ValueError, TypeError, KeyError, AttributeError):
         # Una librería ilegible no puede impedir abrir la app. Tampoco se pisa:
         # puede traer activos propios que el analista querrá rescatar, así que
@@ -175,6 +231,7 @@ def save_cmas(cmas: CMASet) -> Path:
         path,
         {
             "schema": LIBRARY_SCHEMA_VERSION,
+            "ltcma_source": ltcma_source(),
             "assets": [asset_to_dict(a) for a in cmas],
         },
     )
