@@ -29,14 +29,9 @@ from ..theme import (
     series_text_color,
 )
 
-# Ancho mínimo por caja, en fracción del eje, para que las cinco etiquetas no
-# se encabalguen. Por debajo se etiqueta solo la mediana. Calibrado mirando el
-# gráfico: con cuatro años hito y tres estrategias la fracción es ~0.048 y las
-# cinco etiquetas caben cómodas.
-MIN_WIDTH_FOR_LABELS = 0.030
-# Largo de la etiqueta con que se calibró el umbral de arriba (cifras en
-# millones sin decimales, como «44»). El umbral escala con el largo real.
-CALIBRATION_DIGITS = 3
+# Nota al pie cuando alguna cifra de percentil no cupo y se omitió.
+OMITTED_NOTE = ("Etiquetas: mediana y percentiles; las cifras que no caben se omiten "
+                "y están en la tabla")
 
 
 def _box_stats(strategy, years: list[int], real: bool) -> list[dict]:
@@ -137,36 +132,32 @@ def draw_box_chart(
     # —con la escala de Ajustes, que es la de rótulos más largos—, porque el
     # ancho útil del eje depende de ellos. Todo el gráfico usa la misma escala
     # y el rótulo del eje la dice.
+    # La nota va **dentro del eje**, no colgando por debajo en coordenadas de
+    # eje: con `xy=(0, -0.16)` caía fuera del área de trazado y, en la geometría
+    # de página del PDF, aterrizaba justo encima del pie de página —el título y
+    # la fecha impresos por `_new_page`— y los dos textos se superponían.
+    # Se pone **antes** de medir: ocupa una línea con cualquier texto, así que
+    # el eje ya tiene el alto con que se va a ver y lo medido sigue valiendo.
+    footnote = "Caja: percentil 25 a 75 · Línea vertical: percentil 10 a 90 · "
+    ax.set_xlabel(footnote + OMITTED_NOTE, fontsize=8, color=INK_SOFT, loc="left",
+                  labelpad=10)
+
     set_scale(None)
     canvas.layout_now()
     style = _chart_style(ax, boxes_to_label, box_width)
     scale = style["scale"]
     set_scale(scale)
 
-    # ¿Caben las cinco etiquetas por caja, o solo la mediana? El umbral
-    # depende del largo de la cifra más larga en la escala elegida.
-    digits = max(
-        len(format_display(stat[k], scale)) for stats in raw_stats for stat in stats
-        for k in ("whishi", "whislo")
-    )
-    axis_fraction = box_width / max(len(years), 1)
-    label_all = axis_fraction >= MIN_WIDTH_FOR_LABELS * digits / CALIBRATION_DIGITS
-
     # Las etiquetas se ponen al final, cuando el eje Y ya tiene su rango
-    # definitivo: sin él no se puede saber si una caja tiene alto suficiente
-    # para que sus cuartiles no se encabalguen con la mediana.
-    span = float(np.ptp(ax.get_ylim())) or 1.0
-    for pos, stat, on_fill, fill in boxes_to_label:
-        _label_box(ax, pos, stat, on_fill, fill, label_all and show_percentile_labels, span,
-                   style)
+    # definitivo: sin él no se puede saber dónde choca cada cifra.
+    all_fit = _label_boxes(ax, boxes_to_label, box_width, style, show_percentile_labels)
 
-    # La nota va **dentro del eje**, no colgando por debajo en coordenadas de
-    # eje: con `xy=(0, -0.16)` caía fuera del área de trazado y, en la geometría
-    # de página del PDF, aterrizaba justo encima del pie de página —el título y
-    # la fecha impresos por `_new_page`— y los dos textos se superponían.
-    footnote = "Caja: percentil 25 a 75 · Línea vertical: percentil 10 a 90 · Etiqueta: mediana"
-    if not (label_all and show_percentile_labels):
-        footnote += " — solo se etiqueta la mediana; el resto está en la tabla"
+    if not show_percentile_labels:
+        footnote += "Etiqueta: mediana; los percentiles están en la tabla"
+    elif all_fit:
+        footnote += "Etiquetas: mediana y percentiles"
+    else:
+        footnote += OMITTED_NOTE
     ax.set_xlabel(footnote, fontsize=8, color=INK_SOFT, loc="left", labelpad=10)
 
     def probe(x_data, y_data, _ax):
@@ -190,11 +181,6 @@ def draw_box_chart(
 
     canvas.set_hover_probe(probe)
     canvas.finish()
-
-
-# Separación vertical mínima entre dos etiquetas, en fracción del alto del eje.
-# Por debajo se encabalgan y es preferible omitir la de adentro.
-MIN_GAP = 0.055
 
 
 # Tamaño de la mediana, y el mínimo legible antes de pasar a otra escala.
@@ -260,49 +246,105 @@ def _chart_style(ax, boxes, box_width: float) -> dict:
     return {"scale": scales[-1], "fontsize": MIN_MEDIAN_FONT}
 
 
-def _label_box(
-    ax, pos: float, stat: dict, on_fill: str, fill: str, label_all: bool, span: float,
-    style: dict | None = None,
-):
+# Letra de las cifras de percentil.
+PERCENTILE_FONT = 7.0
+
+
+def _label_boxes(ax, boxes, box_width: float, style: dict, show_percentiles: bool) -> bool:
     """Etiquetas numéricas, horizontales, en la escala del gráfico.
 
-    La mediana y los extremos de la línea vertical van siempre. Los cuartiles se
-    omiten cuando la caja es tan baja que su etiqueta chocaría con la de la
-    mediana: el valor sigue estando en la tabla y al pasar el mouse.
+    La mediana va siempre (`_chart_style` ya eligió una escala en que cabe).
+    Con la casilla marcada van además p90 sobre la línea vertical, p10 debajo,
+    y p75 y p25 **dentro** de la caja, pegados a sus bordes.
+
+    Cada cifra se **mide** con el renderizador y se omite solo si choca con
+    otra etiqueta, con la caja o la línea de una estrategia vecina, o si se
+    sale del eje; un cuartil, además, si no cabe dentro de su caja. Antes se
+    decidía todo o nada con un umbral de ancho por número de dígitos, y con tres
+    estrategias el umbral apagaba todas las cifras aunque la mayoría cupiera.
+    Devuelve si cupieron todas.
     """
-    style = style or {"fontsize": MEDIAN_FONT, "scale": None}
-    scale = style["scale"]
-    ax.text(
-        pos,
-        stat["med"],
-        format_display(stat["med"], scale),
-        ha="center",
-        va="center",
-        fontsize=style["fontsize"],
-        fontweight="semibold",
-        color=on_fill,
-        zorder=6,
-        # Fondo del color de la caja: sin él, la línea de la mediana cruza su
-        # propia etiqueta y parece texto tachado.
-        bbox=dict(boxstyle="square,pad=0.12", facecolor=fill, edgecolor="none"),
-    )
-    if not label_all:
-        return
+    from matplotlib.transforms import offset_copy
 
-    for value, va in ((stat["whishi"], "bottom"), (stat["whislo"], "top")):
-        ax.text(pos, value, format_display(value, scale), ha="center", va=va, fontsize=7,
-                color=INK_SOFT, zorder=5)
+    scale, fontsize = style["scale"], style["fontsize"]
+    renderer = _renderer(ax.figure)
+    to_px = ax.transData.transform
+    # Aire hasta lo vecino, en puntos y no en píxeles: el PDF dibuja a otro
+    # dpi que la pantalla y con píxeles fijos el aire se quedaba corto.
+    points = ax.figure.dpi / 72
+    gap_x, gap_y = 2.5 * points, 1.5 * points
 
-    for value, va, reference in (
-        (stat["q3"], "bottom", stat["whishi"]),
-        (stat["q1"], "top", stat["whislo"]),
-    ):
-        room_from_median = abs(value - stat["med"]) / span
-        room_from_whisker = abs(reference - value) / span
-        if room_from_median < MIN_GAP or room_from_whisker < MIN_GAP:
-            continue
-        ax.text(pos, value, format_display(value, scale), ha="center", va=va, fontsize=7,
-                color=INK_SOFT, zorder=5)
+    def padded(b, extra=0.0):
+        return (b.x0 - gap_x - extra, b.x1 + gap_x + extra,
+                b.y0 - gap_y - extra, b.y1 + gap_y + extra)
+
+    def rect(x0, y0, x1, y1):
+        (a, b), (c, d) = to_px([(x0, y0), (x1, y1)])
+        return (min(a, c), max(a, c), min(b, d), max(b, d))
+
+    def hit(a, b):
+        return a[0] < b[1] and b[0] < a[1] and a[2] < b[3] and b[2] < a[3]
+
+    # Caja y línea vertical de cada estrategia: lo que una cifra vecina no
+    # puede tapar. La línea se toma del ancho de su remate (la mitad de la caja).
+    cajas, lineas = [], []
+    for pos, stat, *_ in boxes:
+        cajas.append(rect(pos - box_width / 2, stat["q1"], pos + box_width / 2, stat["q3"]))
+        lineas.append(rect(pos - box_width / 4, stat["whislo"],
+                           pos + box_width / 4, stat["whishi"]))
+    axes_px = ax.get_window_extent(renderer)
+
+    placed: list[tuple] = []
+    for pos, stat, on_fill, fill in boxes:
+        text = ax.text(
+            pos, stat["med"], format_display(stat["med"], scale),
+            ha="center", va="center", fontsize=fontsize, fontweight="semibold",
+            color=on_fill, zorder=6,
+            # Fondo del color de la caja: sin él, la línea de la mediana cruza
+            # su propia etiqueta y parece texto tachado.
+            bbox=dict(boxstyle="square,pad=0.12", facecolor=fill, edgecolor="none"),
+        )
+        # El fondo de la mediana (pad 0.12 del tamaño de letra) también ocupa.
+        placed.append(padded(text.get_window_extent(renderer), 0.12 * fontsize * points))
+
+    if not show_percentiles:
+        return True
+
+    # Prioridad: primero los extremos de todas las cajas, luego los cuartiles.
+    # Si hay que sacrificar algo, que sea lo que está más cerca de la mediana.
+    candidates = []
+    for k, (pos, stat, on_fill, _) in enumerate(boxes):
+        candidates.append((k, pos, stat["whishi"], "bottom", 2, INK_SOFT, False))
+        candidates.append((k, pos, stat["whislo"], "top", -2, INK_SOFT, False))
+    for k, (pos, stat, on_fill, _) in enumerate(boxes):
+        candidates.append((k, pos, stat["q3"], "top", -1, on_fill, True))
+        candidates.append((k, pos, stat["q1"], "bottom", 1, on_fill, True))
+
+    all_fit = True
+    for k, pos, value, va, dy, color, inside in candidates:
+        text = ax.text(
+            pos, value, format_display(value, scale), ha="center", va=va,
+            fontsize=PERCENTILE_FONT, color=color, zorder=5,
+            transform=offset_copy(ax.transData, ax.figure, y=dy, units="points"),
+        )
+        b = text.get_window_extent(renderer)
+        box = padded(b)
+        ok = axes_px.y0 <= b.y0 and b.y1 <= axes_px.y1
+        ok = ok and not any(hit(box, other) for other in placed)
+        ok = ok and not any(
+            hit(box, obstacle)
+            for j in range(len(boxes)) if j != k
+            for obstacle in (cajas[j], lineas[j])
+        )
+        if inside:
+            x0, x1, y0, y1 = cajas[k]
+            ok = ok and x0 <= b.x0 and b.x1 <= x1 and y0 <= b.y0 and b.y1 <= y1
+        if ok:
+            placed.append(box)
+        else:
+            text.remove()
+            all_fit = False
+    return all_fit
 
 
 def distribution_table_rows(result: SimulationResult, years: list[int], real: bool = False):

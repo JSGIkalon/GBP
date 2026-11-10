@@ -363,15 +363,9 @@ class MainWindow(QMainWindow):
         unidad = amount_unit("COP" if view_peso else "")
         self.currency_banner.setVisible(bool(unidad))
         if unidad:
-            partes = [f"Resultados en {unidad}."]
-            if view_peso:
-                partes.append(
-                    f"Tasa inicial de {format_number(view_peso.spot)} COP por USD, con "
-                    f"devaluación de {view_peso.devaluation:.2%} anual; todo se simula en USD."
-                )
-            partes.append("Los datos del caso se ingresan en cifra completa. "
-                          "Se cambia en Ajustes.")
-            self.currency_banner.setText(" ".join(partes))
+            # Solo la unidad de lectura: el aviso dice en qué están las cifras
+            # y nada más.
+            self.currency_banner.setText(f"Cifras en {unidad}")
         self.results.set_view(view_peso, self.scenario.inflation, self.scenario.goals,
                               force=scale_changed)
 

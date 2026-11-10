@@ -710,6 +710,39 @@ ALLOCATION_TABLE_HEIGHT = 0.34
 ALLOCATION_LABEL_DROP = 0.028
 
 
+def _draw_allocation_aligned(canvas: _FigureCanvas, scenario: Scenario, resolver) -> None:
+    """La gráfica de asignación con el bloque —nombres y barras— entre márgenes.
+
+    El margen izquierdo fijo de `ALLOCATION_RECT` está pensado para el nombre de
+    sub-clase más largo que puede salir; con nombres cortos sobraba medio margen
+    vacío y la gráfica quedaba corrida a la derecha respecto a las tablas de
+    abajo. Se dibuja una vez para **medir** los rótulos del eje y se vuelve a
+    dibujar con el eje empezando justo donde terminan, de modo que los nombres
+    arranquen en el margen de la página y las barras lleguen al margen derecho.
+    """
+    figure = canvas.figure
+    antes = set(figure.axes)
+    draw_allocation_chart(canvas, scenario, resolver, ALLOCATION_TITLE_X)
+    nuevos = [ax for ax in figure.axes if ax not in antes]
+    rotulos = [t for ax in nuevos for t in ax.get_yticklabels() if t.get_text()]
+    if not rotulos:
+        return  # estado vacío: un mensaje, nada que alinear
+
+    renderer = figure._get_renderer()
+    eje_x0 = min(ax.get_window_extent(renderer).x0 for ax in nuevos)
+    rotulo_x0 = min(t.get_window_extent(renderer).x0 for t in rotulos)
+    sangria = (eje_x0 - rotulo_x0) / figure.bbox.width
+    for ax in nuevos:
+        ax.remove()
+
+    x, y, _, alto = canvas._rect
+    izquierda = MARGIN + sangria
+    ancho = 1 - MARGIN - izquierda
+    title_x = (MARGIN - izquierda) / ancho
+    draw_allocation_chart(_FigureCanvas(figure, rect=(izquierda, y, ancho, alto)),
+                          scenario, resolver, title_x)
+
+
 def _allocation_page(pdf: PdfPages, options: ReportOptions, page_no: int,
                      scenario: Scenario, footnote: str = "") -> int:
     """La asignación de activos: la gráfica y, **debajo, su tabla**.
@@ -734,7 +767,7 @@ def _allocation_page(pdf: PdfPages, options: ReportOptions, page_no: int,
     ]
 
     def dibujar(canvas):
-        draw_allocation_chart(canvas, scenario, options.resolver, ALLOCATION_TITLE_X)
+        _draw_allocation_aligned(canvas, scenario, options.resolver)
 
     if not bloques:
         return _chart_page(pdf, options, page_no, "Asignación de activos",
