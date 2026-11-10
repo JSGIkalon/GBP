@@ -219,6 +219,30 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+def test_la_sesion_devuelve_los_activos_propios_que_la_libreria_perdio(qapp):
+    """La sesión embebe sus activos propios, como un `.gbp.json`.
+
+    Si la librería se restablece entre una sesión y la siguiente, el caso
+    restaurado referenciaba un activo que ya no existía y no se podía simular.
+    """
+    from gbp.ui.main_window import MainWindow
+
+    cmas = library.seed_cmas()
+    cmas.add(AssetClass(**COLOMBIA))
+    library.save_session(_escenario_mixto(), None, cmas)
+    assert [a.name for a in library.session_custom_assets()] == ["Renta Fija Colombiana"]
+
+    # La librería en disco no lo tiene: se siembra de cero al abrir.
+    ventana = MainWindow()
+    try:
+        assert ventana.scenario.name == "Cliente colombiano"
+        assert ventana.cmas.by_name("Renta Fija Colombiana").is_custom
+        assert "Renta Fija Colombiana" in ventana.correlations.names
+        ventana.scenario.validate(ventana.cmas)
+    finally:
+        ventana.close()
+
+
 @pytest.fixture
 def window(qapp):
     from gbp.ui.main_window import MainWindow

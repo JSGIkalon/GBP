@@ -17,7 +17,7 @@ def draw_debt_chart(canvas, result: SimulationResult):
     if not any(s.has_debt for s in result.strategies):
         canvas.show_message(
             "Este caso no tiene apalancamiento.\n"
-            "Configura un crédito en la pestaña Apalancamiento para ver su evolución."
+            "Configura un crédito en la sub-pestaña Crédito de una estrategia para ver su evolución."
         )
         return
 
@@ -25,8 +25,8 @@ def draw_debt_chart(canvas, result: SimulationResult):
     years = np.arange(1, result.horizon + 1)
     series_data = []
     for i, strategy in enumerate(result.strategies):
-        # Una sola pasada por los tres percentiles, en vez de una por cada uno.
-        low, median, high = np.percentile(strategy.debt, [5, 50, 95], axis=0)
+        # De la caché de la estrategia: redibujar no los recalcula.
+        low, median, high = strategy.debt_bands()
         color = series_color(i)
         ax.fill_between(years, low, high, color=color, alpha=0.16, linewidth=0, zorder=1)
         ax.plot(years, median, color=color, linewidth=2, label=strategy.name, zorder=2)

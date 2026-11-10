@@ -153,6 +153,36 @@ class StrategyResult:
             "success", lambda: float((self.wealth > 0).all(axis=1).mean())
         )
 
+    def success_by_year(self) -> np.ndarray:
+        """Fracción de caminos que **siguen sin agotarse** al cierre de cada año.
+
+        Es la probabilidad de éxito contada año por año: el último valor es
+        `success_probability`, y los anteriores dicen cuándo se pierden los
+        caminos que fallan, que es lo que el número final no cuenta.
+
+        Se recorre por año con un vector de caminos vivos en vez de acumular el
+        mínimo sobre la matriz completa, que sería otra copia de la corrida.
+        """
+        def compute():
+            alive = np.ones(self.n_paths, dtype=bool)
+            out = np.empty(self.horizon)
+            for t in range(self.horizon):
+                alive &= self.wealth[:, t] > 0
+                out[t] = alive.mean()
+            return out
+        return self._cached("success_by_year", compute)
+
+    def debt_bands(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Percentiles 5, 50 y 95 del saldo de la deuda, año por año.
+
+        En caché: el gráfico de deuda se vuelve a dibujar con cada cambio de
+        tamaño de la ventana y los recalculaba sobre la matriz completa.
+        """
+        def compute():
+            low, median, high = np.percentile(self.debt, [5, 50, 95], axis=0)
+            return low, median, high
+        return self._cached("debt_bands", compute)
+
     @property
     def debt_peak(self) -> float:
         """Máximo saldo de deuda de toda la corrida; cero si no hubo crédito."""

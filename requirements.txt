@@ -1,5 +1,10 @@
-numpy
-PySide6
-matplotlib
-pytest
-pyinstaller
+# Versiones fijadas a las que pasan la suite y con las que se arma el instalador.
+# Para actualizar: subir la versión, correr los tests y revisar un PDF exportado
+# (los gráficos miden sus etiquetas con el renderizador de matplotlib).
+numpy==2.5.3
+PySide6==6.11.2
+matplotlib==3.11.2
+pytest==9.1.1
+pyinstaller==6.22.3
+# Solo para tools/import_ltcma.py (reimportar el LTCMA); no viaja en el ejecutable.
+pypdf==6.19.0

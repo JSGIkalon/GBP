@@ -34,6 +34,12 @@ class SimulationSettings:
     # Escala en que se leen los resultados: "normal", "miles", "millones" o
     # "miles_de_millones". Solo cambia cómo se muestran las cifras.
     display_scale: str = "normal"
+    # Cómo se dibuja la distribución: "cajas" (por año hito), "abanico" (bandas
+    # de percentiles año a año) o "medianas" (una línea por estrategia). Y si
+    # el gráfico de cajas rotula los percentiles. Son la misma proyección: solo
+    # cambia la forma de leerla, en pantalla y en el informe.
+    chart_kind: str = "cajas"
+    show_percentile_labels: bool = True
 
     def __post_init__(self) -> None:
         if self.n_paths < 100:

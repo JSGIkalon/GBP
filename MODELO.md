@@ -621,7 +621,7 @@ Las etiquetas de los gráficos van **siempre horizontales**. Si con la escala el
 
 ## 14. Activos fuera del LTCMA
 
-El LTCMA cubre 59 clases en USD. Un cliente colombiano tiene TES, CDT y finca raíz en Bogotá, y nada de eso está ahí ([custom_assets.py](gbp/model/custom_assets.py)).
+El LTCMA cubre 60 clases en USD (edición 2027). Un cliente colombiano tiene TES, CDT y finca raíz en Bogotá, y nada de eso está ahí ([custom_assets.py](gbp/model/custom_assets.py)).
 
 **El problema es asimétrico.** El retorno y la volatilidad son un número cada uno y el analista los puede estimar. **Las correlaciones son 59 números nuevos por activo**, y nadie los va a escribir a mano con criterio. Pero el motor necesita la fila completa, porque factoriza la matriz entera.
 
@@ -731,7 +731,7 @@ gbp/
 │  ├─ summary.py             supuestos resumen por fórmula cerrada (§10)
 │  └─ solver.py              bisección sobre el mismo mercado (§12)
 ├─ io/                       ARCHIVOS
-│  ├─ caseio.py              caso .gbp.json, esquemas 1 a 5 y migraciones
+│  ├─ caseio.py              caso .gbp.json, esquemas 1 a 6 y migraciones
 │  ├─ library.py             librería de CMAs, configuración y sesión en %APPDATA%
 │  └─ report.py              el informe PDF, con matplotlib
 ├─ ui/                       INTERFAZ (PySide6)
@@ -883,7 +883,7 @@ Los recursos embebidos (LTCMA, marca) viajan en la carpeta y se leen vía `sys._
 
 ## 23. Pruebas y herramientas
 
-**Tests** (`pytest`, unos 140 casos en 20 s).
+**Tests** (`pytest`, 166 casos en unos 25 s).
 
 | Archivo | Qué protege |
 |---|---|

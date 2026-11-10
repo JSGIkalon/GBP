@@ -304,6 +304,8 @@ def load_settings() -> SimulationSettings:
             milestone_years=milestones,
             show_cop=bool(payload.get("show_cop", False)),
             display_scale=str(payload.get("display_scale", "normal")),
+            chart_kind=str(payload.get("chart_kind", defaults.chart_kind)),
+            show_percentile_labels=bool(payload.get("show_percentile_labels", True)),
         )
     except (TypeError, ValueError, AttributeError, OSError):
         # Un archivo corrupto no debería impedir abrir la app.
@@ -327,16 +329,34 @@ def session_path() -> Path:
     return app_data_dir() / SESSION_FILE
 
 
-def save_session(scenario, case_path: Path | None = None) -> Path:
-    """Guarda el caso en curso como sesión anterior."""
+def save_session(scenario, case_path: Path | None = None, cmas=None) -> Path:
+    """Guarda el caso en curso como sesión anterior.
+
+    Con la librería, la sesión embebe los activos propios que el caso usa,
+    igual que un `.gbp.json`: si la librería se restablece o se reemplaza entre
+    una sesión y la siguiente, el caso restaurado sigue teniendo sus supuestos.
+    """
     from .caseio import to_dict
 
     path = session_path()
     _write_atomic(
         path,
-        {"case_path": str(case_path) if case_path else None, **to_dict(scenario)},
+        {"case_path": str(case_path) if case_path else None, **to_dict(scenario, cmas)},
     )
     return path
+
+
+def session_custom_assets() -> list:
+    """Activos propios embebidos en la sesión anterior; vacío si no hay o no se lee."""
+    from .caseio import custom_assets_from_dict
+
+    path = session_path()
+    if not path.exists():
+        return []
+    try:
+        return custom_assets_from_dict(json.loads(path.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return []
 
 
 def load_session() -> tuple[object | None, Path | None]:

@@ -922,3 +922,53 @@ Versión 0.3.1. Se reemplazan los supuestos del LTCMA 2026 por los de la edició
   nueva: cambian retorno y volatilidad de las clases del LTCMA, se conservan sus
   yields y notas, y **los activos propios no se tocan**.
 - Huella del motor regenerada: los supuestos de entrada cambiaron.
+
+## Sesión 20 — 10 nov 2026
+
+Versión 0.4.0. Primera tanda del análisis de mejoras: lectura de los resultados.
+Ninguna cifra cambia y la huella del motor queda igual.
+
+**Hecho**
+
+- **Tipo de gráfico de la distribución**, en un desplegable sobre el gráfico:
+  cajas por año hito (el de siempre), **abanico de percentiles** año a año y
+  **medianas comparadas**. El abanico va en un panel por estrategia con el eje Y
+  compartido; arranca en el año 0 con el capital inicial y rotula la mediana
+  final. Vive en `gbp/ui/charts/fan_chart.py`; `charts/distribution.py` es el
+  único punto de entrada para la pantalla y el informe.
+- El tipo elegido y la casilla de percentiles **se recuerdan** (`settings.json`)
+  y son los que salen en el PDF (`ReportOptions.chart_kind`). La casilla de
+  percentiles solo se muestra con las cajas.
+- **Probabilidad de éxito hasta cada año** (`StrategyResult.success_by_year`),
+  como columna en «Flujos y valor» y en la tabla de flujos del informe. El
+  último año es la probabilidad de éxito del plan.
+- **Copiar y guardar**: clic derecho sobre cualquier gráfico lo copia o lo
+  guarda como PNG a 200 dpi; Ctrl+C o clic derecho sobre una tabla de resultados
+  la copia con encabezados, separada por tabuladores, para pegar en Excel.
+- Los percentiles del gráfico de deuda van a la caché de la estrategia: se
+  recalculaban en cada cambio de tamaño de la ventana.
+- **La sesión embebe los activos propios** que el caso usa, como un `.gbp.json`.
+  Antes, si la librería se restablecía entre una sesión y la siguiente, el caso
+  restaurado apuntaba a un activo que ya no existía y no corría.
+- `requirements.txt` con versiones fijadas y con `pypdf`, que el importador del
+  LTCMA usaba sin estar declarado.
+- PROJECT.md y MODELO.md puestos al día: número de tests, 60 clases, esquema 6,
+  moneda de los activos propios, tamaño del instalador.
+- 23 tests nuevos (`tests/test_graficos.py` y uno en `test_custom_assets_ui.py`).
+  166 en verde.
+
+**Decisiones y hallazgos**
+
+- **El abanico no se superpone.** Las series son pasos de una misma rampa azul:
+  cuatro bandas translúcidas en un mismo eje se funden. Paneles lado a lado con
+  el eje compartido conservan la comparación de alturas.
+- **La nota bajo el abanico se saca del cálculo de márgenes** (`set_in_layout`):
+  es más ancha que su panel y `tight_layout` separaba los paneles para hacerle
+  sitio. Los demás paneles reservan el renglón con un rótulo transparente.
+- Quedan fuera, por decisión de Ikalon: inflación y USD/COP estocásticos, colas
+  gordas y regímenes, impuestos y yields por clase. La comisión de gestión es
+  la siguiente candidata y cambia cifras: falta decidir si va por escenario o
+  por estrategia.
+- Pendiente de decidir: el aviso de moneda de la ventana de activo propio
+  todavía dice «la app no convierte monedas», justo encima del selector de
+  moneda que desde la sesión 19 sí convierte.

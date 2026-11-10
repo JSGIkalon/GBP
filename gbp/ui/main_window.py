@@ -80,11 +80,19 @@ class MainWindow(QMainWindow):
         self.base_correlations = CorrelationMatrix.load()
         self.correlations = self.base_correlations
         self.resolver = None
-        self._rebuild_market_model()
         # Se restaura el caso de la sesión anterior. El caso de ejemplo solo
         # aparece la primera vez: volver a ver los mismos supuestos de fábrica
         # después de haber cargado un caso real es perder trabajo.
         restored, restored_path = library.load_session()
+        if restored is not None:
+            # Los activos propios que la sesión usaba y la librería ya no tiene
+            # —se restableció o se reemplazó el archivo— vuelven con el caso.
+            # Si el nombre sigue en la librería manda la librería: es el mismo
+            # computador y es donde el analista los edita.
+            for asset in library.session_custom_assets():
+                if asset.name not in self.cmas.names:
+                    self.cmas.add(asset)
+        self._rebuild_market_model()
         self.scenario = restored if restored is not None else build_sample_case()
         self._restored_session = restored is not None
         self.current_path: Path | None = restored_path
@@ -232,7 +240,7 @@ class MainWindow(QMainWindow):
         self.currency_banner.setVisible(False)
         right_layout.addWidget(self.currency_banner)
 
-        self.results = ResultsPanel()
+        self.results = ResultsPanel(settings=self.settings)
         right_layout.addWidget(self.results, 1)
 
         splitter.addWidget(right)
@@ -441,7 +449,7 @@ class MainWindow(QMainWindow):
 
     def _save_session_now(self):
         try:
-            library.save_session(self.scenario, self.current_path)
+            library.save_session(self.scenario, self.current_path, self.cmas)
         except OSError:
             pass  # que no se pueda guardar la red no debe romper la app
 
@@ -721,6 +729,7 @@ class MainWindow(QMainWindow):
         options.resolver = self.resolver
         options.cmas = self.cmas
         options.show_percentile_labels = self.results.show_percentile_labels
+        options.chart_kind = self.results.chart_kind
         # El informe sale en la moneda que se está viendo, igual que las
         # etiquetas de percentiles.
         options.peso = self.results.peso

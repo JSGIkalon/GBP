@@ -71,8 +71,9 @@ from .caseio import used_custom_assets
 from ..model.results import SimulationResult
 from ..model.scenario import Scenario, SimulationSettings
 from ..ui.charts.allocation_chart import allocation_table_rows, draw_allocation_chart
-from ..ui.charts.box_chart import distribution_table_rows, draw_box_chart
+from ..ui.charts.box_chart import distribution_table_rows
 from ..ui.charts.debt_chart import draw_debt_chart
+from ..ui.charts.distribution import draw_distribution
 from ..ui.theme import (
     BLUE_MID,
     INK,
@@ -128,6 +129,8 @@ class ReportOptions:
     # Lo decide la casilla de la pantalla, no la ventana de exportación: el
     # informe sale con las mismas etiquetas de percentiles que se estaban viendo.
     show_percentile_labels: bool = True
+    # Igual el tipo de gráfico de la distribución: cajas, abanico o medianas.
+    chart_kind: str = "cajas"
     # Resolvedor de clases y librería: hacen falta para que los activos propios
     # salgan agrupados en su clase declarada y documentados como tales.
     resolver: object | None = None
@@ -177,6 +180,19 @@ class _FigureCanvas:
             top -= alto
             ejes.append(self.figure.add_axes((x, top, width, alto)))
             top -= gap
+        return ejes
+
+    def columns(self, count: int):
+        """Ejes lado a lado con el eje Y compartido, dentro del rect."""
+        x, y, width, height = self._rect
+        gap = 0.025 * width if count > 1 else 0.0
+        ancho = (width - gap * (count - 1)) / count
+        ejes = []
+        for i in range(count):
+            ejes.append(self.figure.add_axes(
+                (x + i * (ancho + gap), y, ancho, height),
+                sharey=ejes[0] if ejes else None,
+            ))
         return ejes
 
     def set_hover_probe(self, _probe):
@@ -1261,6 +1277,7 @@ FLOWS = "Flujos y valor de portafolio por año"
 FLOW_COLUMNS = [
     "Año", "Flujos netos", "Flujos netos acumulados",
     "Valor portafolio", "Valor portafolio (moneda de hoy)",
+    "Prob. de éxito hasta el año",
 ]
 
 
@@ -1368,6 +1385,7 @@ def _flows_table(result: SimulationResult) -> _AnnexTable | None:
         if not (serie["aportes"].any() or serie["retiros"].any()):
             continue
         valores = strategy.flow_value_series()
+        exito = strategy.success_by_year()
         bloques.append((
             strategy.name,
             [
@@ -1377,6 +1395,7 @@ def _flows_table(result: SimulationResult) -> _AnnexTable | None:
                     format_display(float(valores["acumulado"][year - 1])),
                     format_display(float(valores["valor_nominal"][year - 1])),
                     format_display(float(valores["valor_real"][year - 1])),
+                    f"{exito[year - 1]:.1%}",
                 ]
                 for year in range(1, strategy.horizon + 1)
             ],
@@ -1389,8 +1408,8 @@ def _flows_table(result: SimulationResult) -> _AnnexTable | None:
         footnote=(
             "Flujos netos: aportes menos retiros, medianos sobre los caminos "
             "simulados. Valor portafolio: patrimonio neto mediano al cierre de cada "
-            "año, en valores nominales y en moneda de hoy descontada a la inflación "
-            "del escenario."
+            "año, nominal y en moneda de hoy. Prob. de éxito hasta el año: caminos en "
+            "que el patrimonio no se ha agotado hasta ese año."
         ),
     )
 
@@ -1554,8 +1573,8 @@ def build_report(
                 page = _chart_page(
                     pdf, options, page,
                     f"Distribución · {'moneda de hoy' if es_real else 'nominal'}",
-                    lambda canvas, r=es_real: draw_box_chart(
-                        canvas, result, years, r,
+                    lambda canvas, r=es_real: draw_distribution(
+                        canvas, result, years, r, kind=options.chart_kind,
                         show_percentile_labels=options.show_percentile_labels,
                     ),
                     _cite(

@@ -17,7 +17,7 @@ documento cubre la arquitectura y las decisiones de ingeniería.
 
 | Sesión | Alcance | Estado |
 |---|---|---|
-| 1 | Entorno, importador del LTCMA, modelo de dominio, motor Monte Carlo, apalancamiento, stress tests, librería de CMAs, tests | **Completa** |
+| 1 | Entorno, importador del LTCMA, modelo de dominio, motor Monte Carlo, apalancamiento, stress tests (retirados en la sesión 10), librería de CMAs, tests | **Completa** |
 | 2 | Interfaz PySide6: paneles de input, guardado/carga de casos, simulación en hilo | **Completa** |
 | 3 | Gráficos (barras de rango, box plot), tablas de resumen, pestaña de estrés | **Completa** |
 | 4 | Empaquetado a .exe portable con PyInstaller | **Completa** |
@@ -33,8 +33,12 @@ documento cubre la arquitectura y las decisiones de ingeniería.
 | 16 | Instalador (Inno Setup) en vez de .exe portable | **Completa** |
 | 17 | Indexación desde el año 2, toggle de percentiles rápido y respetado en el PDF, sin frases de veredicto | **Completa** |
 | 18 | Metas, solver y vista en COP (opcionales), cifras completas, auditoría de bugs y rendimiento, suite depurada, MODELO.md reescrito | **Completa** |
+| 19 | Pesos colombianos: activos propios y flujos en COP, supuestos del peso en Escenario, escala de lectura | **Completa** |
+| 20 | Tipo de gráfico de la distribución (cajas, abanico, medianas), probabilidad de éxito por año, copiar gráficos y tablas | **Completa** |
 
-**La aplicación está terminada y funcionando.** 139 tests en verde. Una huella
+Las sesiones 11 a 15 están en el [CHANGELOG](CHANGELOG.md).
+
+**La aplicación está terminada y funcionando.** 166 tests en verde. Una huella
 bit a bit del motor (`tools/fingerprint.py`) protege las cifras de cualquier
 refactor. Se entrega como instalador, `dist\GBP-Setup-<versión>.exe` (35 MB).
 El build prueba el propio ejecutable con `GBP.exe --smoke-test`, y
@@ -57,7 +61,7 @@ py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 
 .\.venv\Scripts\python.exe run.py                       # abre la aplicación
-.\.venv\Scripts\python.exe -m pytest tests\ -q          # 158 tests
+.\.venv\Scripts\python.exe -m pytest tests\ -q          # 166 tests
 .\tools\build_exe.ps1                                   # genera el instalador en dist\
 
 $env:PYTHONPATH="."; .\.venv\Scripts\python.exe tools\smoke_pdf_case.py
@@ -77,7 +81,11 @@ $env:PYTHONPATH="."; .\.venv\Scripts\python.exe tools\smoke_pdf_case.py
 4. **Ajustes** — número de simulaciones (10.000 por defecto), semilla, años hito.
 5. **Correr simulación** (o F5) y revisar las pestañas de resultado:
    **Distribución** (nominal), **Ajustada por inflación** (la misma proyección en
-   moneda de hoy), **Supuestos**, **Asignación** y **Deuda**. La unidad no se
+   moneda de hoy), **Flujos y valor**, **Supuestos**, **Asignación** y **Deuda**.
+   La distribución se puede ver como cajas por año hito, como abanico de
+   percentiles año a año o como medianas comparadas; el tipo elegido se
+   recuerda y es el que sale en el PDF. Clic derecho sobre un gráfico lo copia
+   o lo guarda como PNG; Ctrl+C sobre una tabla la deja lista para pegar en Excel. La unidad no se
    configura: las dos están siempre a un clic, porque la nominal es la que verá
    en su extracto y la real la que dice qué podrá comprar.
 6. **Exportar PDF** (o Ctrl+E) para dejar el registro de la corrida y entregarlo.
@@ -122,10 +130,12 @@ gbp/
                  export_dialog, custom_asset_dialog
     panels/      scenario, strategies (con cashflow, leverage, capital dentro),
                  assets, correlation, settings, results
-    charts/      canvas (con hover), box_chart, allocation_chart, debt_chart
+    charts/      canvas (con hover y copiar/guardar imagen), distribution
+                 (elige el tipo), box_chart, fan_chart (abanico y medianas),
+                 allocation_chart, debt_chart
 tools/           import_ltcma, extract_brand, smoke_pdf_case, packaging_check,
                  screenshot, build_exe.ps1
-tests/           158 tests
+tests/           166 tests
 ```
 
 ### El modelo de estrategia
@@ -185,7 +195,8 @@ Otras reglas de los gráficos:
 
 ### Activos propios: patrimonio fuera del LTCMA
 
-El LTCMA cubre 59 clases en USD. Un cliente colombiano tiene TES, CDT y finca
+El LTCMA cubre 60 clases en USD (edición 2027; eran 59 en la de 2026, que es
+la que se midió en la tabla de abajo). Un cliente colombiano tiene TES, CDT y finca
 raíz en Bogotá, y nada de eso está ahí. Un **activo propio** es una clase que
 declara el analista, con su retorno y su volatilidad.
 
@@ -227,10 +238,13 @@ construcción es realizable. Excluir la diagonal rompe la garantía de PSD en
 silencio, sin que nada falle. Lo protege
 `test_el_promedio_de_clase_incluye_los_terminos_diagonales`.
 
-**Moneda.** Los tres números van en USD y la app **no convierte**. Es decisión
-explícita: un 10% en pesos sin descontar devaluación baja la volatilidad del
+**Moneda.** Hasta la sesión 18 los tres números iban en USD y la app no
+convertía: un 10% en pesos sin descontar devaluación baja la volatilidad del
 portafolio y dispara la probabilidad de éxito, y el informe saldría
-espectacular y mal. El diálogo lo advierte con el ejemplo numérico.
+espectacular y mal. Desde la sesión 19 el activo puede declararse **en COP** y
+el motor lo lleva a dólares con la devaluación esperada del caso
+(`AssetClass.in_usd`): retorno `(1 + c) / (1 + d) − 1` y volatilidad
+`s / (1 + d)`. La devaluación es fija; no hay riesgo cambiario simulado.
 
 **Dónde viven.** En `cma_library.json` para reusarlos entre clientes **y**
 copiados dentro del `.gbp.json`, porque los declara cada analista y sin eso un
@@ -245,7 +259,7 @@ librería o quedarse con la local, pero nunca en silencio.
 
 ### El corte de clases de activo
 
-`gbp/model/groups.py` agrega las 59 sub-clases en **cuatro**: renta variable,
+`gbp/model/groups.py` agrega las 60 sub-clases en **cuatro**: renta variable,
 renta fija, alternativos y caja. Es la lectura de comité, y es **solo vista**:
 los pesos se cargan siempre por sub-clase, que es el nivel al que existen
 retorno, volatilidad y correlación.
@@ -370,10 +384,11 @@ Regla: los atributos de un widget llevan sufijo (`metric_box`, `solve_result`).
 | Retorno / volatilidad / yield del LTCMA | `%APPDATA%/Ikalon/GBP/cma_library.json` | No, solo lectura |
 | Activos propios | misma librería, más copia en el `.gbp.json` | Sí, se crean y editan |
 | Nº de simulaciones y años hito (la semilla es fija, 42) | `%APPDATA%/Ikalon/GBP/settings.json` | Sí, en Ajustes |
-| Caso de la sesión anterior | `%APPDATA%/Ikalon/GBP/last_session.json` | Se guarda al cerrar |
+| Tipo de gráfico de la distribución y etiquetas de percentiles | mismo `settings.json` | Sí, sobre el gráfico |
+| Caso de la sesión anterior, con sus activos propios | `%APPDATA%/Ikalon/GBP/last_session.json` | Se guarda al cerrar |
 | Portada del informe (autor, cliente) | `%APPDATA%/Ikalon/GBP/report_defaults.json` | Sí, al exportar |
 | Caso del cliente (escenario + estrategias) | `.gbp.json` elegido por el usuario | Sí |
-| Metas y tasa USD/COP (opcionales) | dentro del `.gbp.json` (esquema 5) | Sí, en Escenario |
+| Metas y supuestos del peso (opcionales) | dentro del `.gbp.json` (esquemas 5 y 6) | Sí, en Escenario |
 | Huella de referencia del motor | `tests/data/fingerprint.json` | No; `tools/fingerprint.py --write` |
 | Logos Ikalon | `gbp/data/brand/` (embebido) | No |
 
@@ -504,7 +519,7 @@ escenario, que cerraría buena parte de la diferencia.
 ## Empaquetado e instalador
 
 ```powershell
-.\tools\build_exe.ps1     # -> dist\GBP\ (la app) y dist\GBP-Setup-<versión>.exe (57 MB)
+.\tools\build_exe.ps1     # -> dist\GBP\ (la app) y dist\GBP-Setup-<versión>.exe (35 MB)
 ```
 
 Hace falta **Inno Setup 6** (`winget install JRSoftware.InnoSetup`). El script

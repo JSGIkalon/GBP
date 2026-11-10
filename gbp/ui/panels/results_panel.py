@@ -33,9 +33,11 @@ from ...model.goals import goal_probability
 from ...model.results import SimulationResult
 from ...model.scenario import Scenario, SimulationSettings
 from ..charts.allocation_chart import allocation_table_rows, draw_allocation_chart
-from ..charts.box_chart import distribution_table_rows, draw_box_chart
+from ..charts.box_chart import distribution_table_rows
 from ..charts.canvas import ChartCanvas
 from ..charts.debt_chart import draw_debt_chart
+from ..charts.distribution import BOXES, CHART_KINDS, draw_distribution, normalize_kind
+from ..table_copy import enable_copy
 from ..theme import INK_SOFT, amount_unit, format_display
 
 EMPTY = "Carga los datos del caso y pulsa «Correr simulación»."
@@ -51,6 +53,8 @@ def _table(columns: list[str]) -> QTableWidget:
     header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
     for i in range(1, len(columns)):
         header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+    # Toda tabla de resultados se puede llevar a Excel: Ctrl+C o clic derecho.
+    enable_copy(table)
     return table
 
 
@@ -80,7 +84,7 @@ def _fill(table: QTableWidget, rows: list[dict], columns: list[str]):
 class ResultsPanel(QTabWidget):
     """Todas las vistas de resultado de una corrida."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, settings: SimulationSettings | None = None):
         super().__init__(parent)
         # `base_result` es la corrida tal como salió, en USD. `result` es lo que
         # se está mostrando: la misma corrida o su vista en COP. Todas las
@@ -92,15 +96,21 @@ class ResultsPanel(QTabWidget):
         self.inflation = 0.0
         self._view_key = None
         self.goals: list = []
-        self.settings = SimulationSettings()
+        # Los ajustes de la app. Las dos preferencias de lectura del gráfico
+        # —tipo y etiquetas de percentiles— se escriben ahí al cambiarlas, y la
+        # ventana principal los guarda al cerrar: se recuerdan entre sesiones.
+        self.settings = settings if settings is not None else SimulationSettings()
         self.years: list[int] = []
         # Los percentiles p10/p25/p75/p90 se pueden ocultar del gráfico: la
         # mediana es la cifra que importa y las demás siempre están en la
         # tabla de abajo, así que ocultarlas despeja la caja sin perder nada.
-        self.show_percentile_labels = True
+        self.show_percentile_labels = self.settings.show_percentile_labels
+        # Cajas, abanico o medianas: la misma distribución, leída distinto.
+        self.chart_kind = normalize_kind(self.settings.chart_kind)
         # Referencias explícitas a las dos casillas: buscarlas con
         # `findChildren(QCheckBox)` alcanzaría cualquier otra casilla del panel.
         self._percentile_toggles: list[QCheckBox] = []
+        self._kind_selectors: list[QComboBox] = []
 
         # --- Distribución, en las dos unidades ---------------------------
         self.range_columns = [
@@ -128,13 +138,16 @@ class ResultsPanel(QTabWidget):
         self.flow_columns = [
             "Año", "Flujos netos", "Flujos netos acumulados",
             "Valor portafolio", "Valor portafolio (moneda de hoy)",
+            "Prob. de éxito hasta el año",
         ]
         self.flows_table = _table(self.flow_columns)
         f_layout.addWidget(self.flows_table, 1)
         flows_note = QLabel(
             "Flujos netos: aportes menos retiros, medianos sobre los caminos simulados. "
             "Valor portafolio: patrimonio neto mediano al cierre de cada año, en "
-            "valores nominales y en moneda de hoy."
+            "valores nominales y en moneda de hoy. Probabilidad de éxito hasta el año: "
+            "fracción de caminos en que el patrimonio no se ha agotado hasta ese año; "
+            "la del último año es la probabilidad de éxito del plan."
         )
         flows_note.setWordWrap(True)
         flows_note.setStyleSheet(f"color: {INK_SOFT};")
@@ -217,11 +230,26 @@ class ResultsPanel(QTabWidget):
         layout = QVBoxLayout(page)
         canvas = ChartCanvas(height=4.6)
         layout.addWidget(canvas, 3)
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Gráfico:"))
+        selector = QComboBox()
+        for key, label in CHART_KINDS.items():
+            selector.addItem(label, key)
+        selector.setCurrentIndex(selector.findData(self.chart_kind))
+        selector.currentIndexChanged.connect(self._on_kind_selected)
+        self._kind_selectors.append(selector)
+        controls.addWidget(selector)
+        controls.addSpacing(18)
         toggle = QCheckBox("Mostrar percentiles p10/p25/p75/p90 en el gráfico")
-        toggle.setChecked(True)
+        toggle.setChecked(self.show_percentile_labels)
+        # Solo las cajas rotulan percentiles; en las otras vistas la casilla
+        # no aplica y se quita de la vista.
+        toggle.setVisible(self.chart_kind == BOXES)
         toggle.toggled.connect(self._toggle_percentile_labels)
         self._percentile_toggles.append(toggle)
-        layout.addWidget(toggle)
+        controls.addWidget(toggle)
+        controls.addStretch(1)
+        layout.addLayout(controls)
         table = _table(self.range_columns)
         layout.addWidget(table, 2)
         label = QLabel(note)
@@ -234,6 +262,7 @@ class ResultsPanel(QTabWidget):
     def _toggle_percentile_labels(self, checked: bool):
         """Un solo interruptor para las dos unidades: es la misma preferencia de lectura."""
         self.show_percentile_labels = checked
+        self.settings.show_percentile_labels = checked
         for checkbox in self._percentile_toggles:
             checkbox.blockSignals(True)
             checkbox.setChecked(checked)
@@ -241,11 +270,27 @@ class ResultsPanel(QTabWidget):
         if self.result is not None:
             self._draw_distributions()
 
+    def _on_kind_selected(self, _index: int):
+        self.set_chart_kind(self.sender().currentData())
+
+    def set_chart_kind(self, kind: str):
+        """Un solo tipo de gráfico para las dos unidades, como las etiquetas."""
+        self.chart_kind = normalize_kind(kind)
+        self.settings.chart_kind = self.chart_kind
+        for selector in self._kind_selectors:
+            selector.blockSignals(True)
+            selector.setCurrentIndex(selector.findData(self.chart_kind))
+            selector.blockSignals(False)
+        for checkbox in self._percentile_toggles:
+            checkbox.setVisible(self.chart_kind == BOXES)
+        if self.result is not None:
+            self._draw_distributions()
+
     def _draw_distributions(self):
         for canvas, real in ((self.box_canvas, False), (self.real_canvas, True)):
             def draw(canvas=canvas, real=real):
-                draw_box_chart(
-                    canvas, self.result, self.years, real,
+                draw_distribution(
+                    canvas, self.result, self.years, real, kind=self.chart_kind,
                     show_percentile_labels=self.show_percentile_labels,
                 )
             draw()
@@ -281,6 +326,11 @@ class ResultsPanel(QTabWidget):
 
     def show_result(self, result: SimulationResult, settings: SimulationSettings, horizon: int):
         self.base_result = result
+        if settings is not self.settings:
+            # Otro objeto de ajustes: las preferencias de lectura viajan con el
+            # panel, que es donde se eligen.
+            settings.chart_kind = self.chart_kind
+            settings.show_percentile_labels = self.show_percentile_labels
         self.settings = settings
         self.years = settings.milestones_within(horizon)
         self._render()
@@ -380,6 +430,7 @@ class ResultsPanel(QTabWidget):
             return
         strategy = self.result.strategies[index]
         valores = strategy.flow_value_series()
+        exito = strategy.success_by_year()
         rows = [
             {
                 "Año": year,
@@ -389,11 +440,12 @@ class ResultsPanel(QTabWidget):
                 "Valor portafolio (moneda de hoy)": format_display(
                     float(valores["valor_real"][year - 1])
                 ),
+                "Prob. de éxito hasta el año": f"{exito[year - 1]:.1%}",
             }
             for year in range(1, strategy.horizon + 1)
         ]
         _fill(self.flows_table, rows, self.flow_columns)
-        _mark_currency(self.flows_table, self.flow_columns, set(self.flow_columns[1:]),
+        _mark_currency(self.flows_table, self.flow_columns, set(self.flow_columns[1:5]),
                        self.result.currency)
 
     # ------------------------------------------------------------------

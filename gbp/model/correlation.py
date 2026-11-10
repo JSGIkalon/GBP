@@ -1,8 +1,8 @@
 """Matriz de correlación entre clases de activo.
 
 La matriz **no es un input de la interfaz**: se toma de las *Assumption Matrices*
-(sección III) del LTCMA 2026 de J.P. Morgan (tabla de supuestos en USD, 59 clases
-de activo) y queda embebida como recurso de la app en `gbp/data/correlations.json`,
+(sección III) del LTCMA de J.P. Morgan (tabla de supuestos en USD; 60 clases de
+activo en la edición 2027) y queda embebida como recurso de la app en `gbp/data/correlations.json`,
 generado por `tools/import_ltcma.py`. La UI solo la muestra en modo lectura.
 
 La matriz publicada viene redondeada a dos decimales y estimada sobre ventanas

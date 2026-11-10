@@ -95,6 +95,19 @@ class ChartCanvas(FigureCanvasQTAgg):
             len(height_ratios), 1, height_ratios=list(height_ratios)
         )
 
+    def columns(self, count: int):
+        """Varios ejes lado a lado con el eje Y compartido, como lista.
+
+        Para comparar la misma lectura entre estrategias sin superponerlas: el
+        eje compartido es lo que hace que las alturas se puedan comparar de un
+        panel a otro.
+        """
+        self.figure.clear()
+        self._annotation = None
+        self._background = None
+        axes = self.figure.subplots(1, count, sharey=True, squeeze=False)
+        return list(axes[0])
+
     def set_hover_probe(self, probe: Callable[[float, float, object], str | None] | None):
         """Función que, dadas las coordenadas de datos, devuelve el texto a mostrar."""
         self._hover_probe = probe
@@ -143,6 +156,51 @@ class ChartCanvas(FigureCanvasQTAgg):
             annotation.set_text(text)
         annotation.set_visible(True)
         self._blit()
+
+    # --- Sacar el gráfico de la app ------------------------------------
+    EXPORT_DPI = 200
+
+    def _png_bytes(self) -> bytes:
+        """El gráfico como PNG, sin el tooltip que hubiera en ese momento."""
+        import io
+
+        if self._annotation is not None:
+            self._annotation.set_visible(False)
+        buffer = io.BytesIO()
+        self.figure.savefig(buffer, format="png", dpi=self.EXPORT_DPI)
+        # Guardar dibuja la figura a otro dpi: la foto del blitting ya no vale.
+        self._background = None
+        self.draw_idle()
+        return buffer.getvalue()
+
+    def copy_image(self):
+        from PySide6.QtGui import QImage
+        from PySide6.QtWidgets import QApplication
+
+        QApplication.clipboard().setImage(QImage.fromData(self._png_bytes(), "PNG"))
+
+    def save_image(self):
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Guardar gráfico", "grafico.png", "Imagen PNG (*.png)"
+        )
+        if not path:
+            return
+        try:
+            Path(path).write_bytes(self._png_bytes())
+        except OSError as exc:
+            QMessageBox.warning(self, "No se pudo guardar el gráfico", str(exc))
+
+    def contextMenuEvent(self, event):
+        from PySide6.QtWidgets import QMenu
+
+        menu = QMenu(self)
+        menu.addAction("Copiar imagen", self.copy_image)
+        menu.addAction("Guardar como PNG…", self.save_image)
+        menu.exec(event.globalPos())
 
     def layout_now(self):
         """Ajusta márgenes ya, para que un gráfico mida sus etiquetas con el
