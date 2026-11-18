@@ -269,3 +269,55 @@ def test_meta_y_credito_en_cop_sobreviven_al_guardado():
     # Un caso viejo, sin el campo, abre en USD.
     data["scenario"]["goals"][0].pop("currency")
     assert from_dict(data).goals[0].currency == "USD"
+
+
+# --------------------------------------------------------------------------
+# Cambiar la vista no recalcula la corrida
+# --------------------------------------------------------------------------
+
+
+def test_filtro_grafico_y_pantallas_no_recalculan_la_corrida(window, monkeypatch):
+    """Ni simular de nuevo, ni convertir a COP, ni recalcular percentiles."""
+    import gbp.engine.montecarlo as mc
+    from gbp.model.results import SimulationResult
+
+    window.scenario.peso = PesoAssumptions(spot=4_000.0, devaluation=0.03)
+    window.settings.show_cop = True
+    window.settings.n_paths = 2_000
+    result = simulate(window.scenario, window.cmas.in_usd(0.03), window.correlations,
+                      window.settings)
+    window._run_scenario = deepcopy(window.scenario)
+    window._on_finished(result)
+    window._apply_result_view()
+
+    llamadas = {"sim": 0, "fx": 0, "pct": 0}
+    real_sim, real_fx, real_pct = mc.simulate, SimulationResult.in_currency, np.percentile
+    monkeypatch.setattr(mc, "simulate", lambda *a, **k: llamadas.__setitem__(
+        "sim", llamadas["sim"] + 1) or real_sim(*a, **k))
+    monkeypatch.setattr(SimulationResult, "in_currency", lambda self, *a, **k: (
+        llamadas.__setitem__("fx", llamadas["fx"] + 1) or real_fx(self, *a, **k)))
+    monkeypatch.setattr(np, "percentile", lambda *a, **k: (
+        llamadas.__setitem__("pct", llamadas["pct"] + 1) or real_pct(*a, **k)))
+
+    # Una primera pasada por cada vista llena las cachés de lo que aún no se vio.
+    nombres = [s.name for s in window.scenario.strategies]
+    for kind in ("abanico", "medianas", "cajas"):
+        window.results.set_chart_kind(kind)
+    for i in range(window.results.count()):
+        window.results.setCurrentIndex(i)
+    window.strategy_filter.set_selected(nombres[:1])
+    window.strategy_filter.set_selected(nombres)
+    llamadas.update(sim=0, fx=0, pct=0)
+
+    for _ in range(2):
+        window.strategy_filter.set_selected(nombres[:1])
+        window.strategy_filter.set_selected(nombres)
+        for kind in ("abanico", "medianas", "cajas"):
+            window.results.set_chart_kind(kind)
+        for i in range(window.results.count()):
+            window.results.setCurrentIndex(i)
+        for i in range(window.inputs.count()):
+            window._go_to_section(i)
+        window.settings_panel.show_cop.setChecked(True)
+
+    assert llamadas == {"sim": 0, "fx": 0, "pct": 0}

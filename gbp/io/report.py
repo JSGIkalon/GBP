@@ -122,6 +122,9 @@ class ReportOptions:
     # Vista en pesos: los supuestos del peso del caso, con los que se convierte
     # cada cifra con la tasa de su año. `None` es el informe de siempre, en USD.
     peso: object | None = None
+    # La corrida ya convertida a esa moneda, si la interfaz la tiene: evita
+    # copiar de nuevo todos los caminos y recalcular sus percentiles.
+    converted_result: object | None = None
 
     @property
     def fx_spot(self) -> float | None:
@@ -1248,7 +1251,7 @@ SUMMARY_INDICATORS = [
     ("Yield de largo plazo", lambda s, real: f"{s.summary.yield_:.2%}"),
     ("Sharpe de largo plazo", lambda s, real: f"{s.summary.sharpe_ratio:.2f}"),
     ("Patrimonio mediano final",
-     lambda s, real: format_display(float(np.median(s.terminal_values(real))))),
+     lambda s, real: format_display(s.terminal_median(real))),
     ("CVaR 5% al final", lambda s, real: format_display(s.cvar(s.horizon, 0.05, real))),
     ("Cambio del patrimonio en el último año",
      lambda s, real: f"{s.last_year_change(real):.2%}"),
@@ -1533,7 +1536,10 @@ def build_report(
     # solo de lectura y no cambia ninguna probabilidad.
     base_result = result
     if options.peso is not None:
-        result = result.in_currency(options.peso, scenario.inflation)
+        ya = options.converted_result
+        result = ya if ya is not None and ya.horizon == result.horizon else (
+            result.in_currency(options.peso, scenario.inflation)
+        )
     nota_moneda = _currency_note(options)
     years = settings.milestones_within(result.horizon)
     moneda = f"Valores nominales. {nota_moneda}".strip()

@@ -126,6 +126,11 @@ class MainWindow(QMainWindow):
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
         self._refresh_timer.timeout.connect(self._refresh_dependent_views)
+        # La vista de resultados se actualiza al terminar de escribir: cambiar la
+        # tasa USD/COP tecla a tecla convertía todos los caminos en cada tecla.
+        self._view_timer = QTimer(self)
+        self._view_timer.setSingleShot(True)
+        self._view_timer.timeout.connect(self._apply_result_view)
         self._shown_allocation = None
         self._shown_milestones = list(self.settings.milestone_years)
 
@@ -530,7 +535,9 @@ class MainWindow(QMainWindow):
         self.strategies_panel.cashflow_panel._update_summary()
         self._refresh_timer.start(200)
         self._schedule_session_save()
-        self._apply_result_view()
+        self._view_timer.start(250)
+        # Indicadores y aviso de optimizado leen cachés: van de inmediato.
+        self._update_kpis()
         self._flag_stale_results()
 
     def _apply_result_view(self, *_):
@@ -1030,6 +1037,8 @@ class MainWindow(QMainWindow):
         # El informe sale en la moneda que se está viendo, igual que las
         # etiquetas de percentiles.
         options.peso = self.results.peso
+        if options.peso is not None and self.results.base_result is not None:
+            options.converted_result = self.results._converted()
         options.solve = solve
         suggested = f"{options.title} — {scenario.name}.pdf".replace("/", "-")
         path, _ = QFileDialog.getSaveFileName(

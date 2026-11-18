@@ -104,6 +104,18 @@ def goal_probability(strategy_result, goal: Goal, peso=None) -> float:
     Devuelve `nan` si el año de la meta cae fuera del horizonte simulado: no
     es que la probabilidad sea cero, es que la corrida no llegó hasta ahí.
     """
+    cache = getattr(strategy_result, "_cache", None)
+    key = ("goal", goal.amount, goal.year, goal.real, goal.currency,
+           None if peso is None else (peso.spot, peso.devaluation, peso.inflation))
+    if cache is not None and key in cache:
+        return cache[key]
+    p = _goal_probability(strategy_result, goal, peso)
+    if cache is not None:
+        cache[key] = p
+    return p
+
+
+def _goal_probability(strategy_result, goal: Goal, peso=None) -> float:
     horizon = strategy_result.horizon
     if not goal.fits(horizon):
         return float("nan")

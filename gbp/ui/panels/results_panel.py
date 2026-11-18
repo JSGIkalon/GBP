@@ -324,6 +324,8 @@ class ResultsPanel(QTabWidget):
             canvas.set_redraw(draw if self.result is not None else None)
 
     def clear(self):
+        self._converted_key = None
+        self._converted_result = None
         self.base_result = None
         self.result = None
         self.years = []
@@ -437,10 +439,24 @@ class ResultsPanel(QTabWidget):
         elif not self.goals and index >= 0:
             self.removeTab(index)
 
+    def _converted(self) -> SimulationResult:
+        """La corrida en la moneda de lectura, convertida una sola vez.
+
+        `in_currency` copia todos los caminos y devuelve cachés vacías: hacerlo
+        en cada clic del filtro, del tipo de gráfico o de una pestaña obligaba a
+        recalcular todos los percentiles, y con muchos caminos parecía que se
+        volvía a simular. Se guarda mientras no cambien la corrida ni la tasa.
+        """
+        if self.peso is None:
+            return self.base_result
+        key = (id(self.base_result), self._view_key)
+        if getattr(self, "_converted_key", None) != key:
+            self._converted_result = self.base_result.in_currency(self.peso, self.inflation)
+            self._converted_key = key
+        return self._converted_result
+
     def _render(self):
-        result = self.base_result
-        if self.peso is not None:
-            result = result.in_currency(self.peso, self.inflation)
+        result = self._converted()
         if self.hidden:
             result = result.subset([n for n in result.names if n not in self.hidden])
         self.result = result
@@ -570,7 +586,7 @@ class ResultsPanel(QTabWidget):
             ("Sharpe de largo plazo", lambda s: f"{s.summary.sharpe_ratio:.2f}"),
             (
                 "Patrimonio mediano final",
-                lambda s: format_display(float(np.median(s.terminal_values(real)))),
+                lambda s: format_display(s.terminal_median(real)),
             ),
             (
                 "CVaR 5% al final",

@@ -115,9 +115,13 @@ class StrategyResult:
         """
         if years is None:
             years = list(range(1, self.horizon + 1))
-        wanted = percentiles if percentiles is not None else PERCENTILES
-        data = self._columns(years, real)
-        return {p: np.percentile(data, p, axis=0) for p in wanted}
+        wanted = tuple(percentiles if percentiles is not None else PERCENTILES)
+
+        def compute():
+            data = self._columns(years, real)
+            return {p: np.percentile(data, p, axis=0) for p in wanted}
+
+        return dict(self._cached(("percentiles", tuple(years), real, wanted), compute))
 
     def mean(self, years: list[int] | None = None, real: bool = False) -> np.ndarray:
         if years is None:
@@ -202,6 +206,12 @@ class StrategyResult:
 
     def terminal_values(self, real: bool = False) -> np.ndarray:
         return self._columns([self.horizon], real)[:, 0]
+
+    def terminal_median(self, real: bool = False) -> float:
+        return self._cached(
+            ("terminal_median", real),
+            lambda: float(np.median(self.terminal_values(real))),
+        )
 
     def last_year_change(self, real: bool = False) -> float:
         """Variación mediana del patrimonio neto en el **último año proyectado**.
