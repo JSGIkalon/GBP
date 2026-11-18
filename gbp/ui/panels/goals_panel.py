@@ -66,6 +66,10 @@ class GoalsPanel(QWidget):
         header.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
         for col in range(1, len(COLUMNS)):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+        # El combo de moneda es un widget de celda: «ajustar al contenido» no lo
+        # mide y la columna quedaba cortando «COP». Ancho fijo suficiente.
+        header.setSectionResizeMode(COL_CURRENCY, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(COL_CURRENCY, 84)
         self.table.setMinimumHeight(120)
         self.table.setMaximumHeight(200)
         self.table.itemChanged.connect(self._on_item_changed)
