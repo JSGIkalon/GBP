@@ -276,6 +276,15 @@ def _money(value: float, options: ReportOptions) -> str:
     return format_display(value * (options.fx_spot or 1.0))
 
 
+def _capital(value: float, scenario: Scenario, options: ReportOptions) -> str:
+    """Un capital del caso, escrito en su moneda, en la moneda del informe.
+
+    Se lleva primero a la base (USD) con la tasa inicial y luego a la moneda del
+    informe, así que un capital en COP leído en COP vuelve a su cifra original.
+    """
+    return _money(value * scenario.capital_factor, options)
+
+
 def _flow_amount(flow, options: ReportOptions) -> str:
     """El monto de un flujo de monto fijo, con su moneda si no es la del informe."""
     if flow.currency == "COP":
@@ -303,7 +312,7 @@ def _cover_kpis(scenario: Scenario, result: SimulationResult,
     unidad = amount_unit("COP" if options.fx_spot else "")
     capital = f"Capital inicial ({unidad})" if unidad else "Capital inicial"
     return [
-        (_money(scenario.initial_value, options), capital),
+        (_capital(scenario.initial_value, scenario, options), capital),
         (f"{scenario.horizon} años", "Horizonte"),
         (f"{scenario.inflation:.2%}", "Inflación anual"),
         (format_number(result.n_paths), "Simulaciones"),
@@ -1031,8 +1040,8 @@ def _strategy_paragraphs(strategy, scenario: Scenario,
         f"{name} {weight:.1%}" for name, weight in strategy.weights.items()
     ) or "sin pesos definidos"
     capital = (
-        _money(strategy.initial_value, options) if strategy.has_own_initial
-        else f"{_money(scenario.initial_value, options)} (del escenario)"
+        _capital(strategy.initial_value, scenario, options) if strategy.has_own_initial
+        else f"{_capital(scenario.initial_value, scenario, options)} (del escenario)"
     )
 
     parrafos: list[tuple[str, dict]] = [
@@ -1058,7 +1067,10 @@ def _strategy_paragraphs(strategy, scenario: Scenario,
             if loan.max_ltv is not None else ", sin control de LTV"
         )
         parrafos.append((
-            f"Crédito · {loan.name}: {_money(loan.principal, options)} en el año "
+            f"Crédito · {loan.name}: "
+            + (f"{format_number(loan.principal)} COP" if loan.currency == "COP"
+               else _money(loan.principal, options))
+            + f" en el año "
             f"{loan.start_year}, plazo {loan.term_years} años, {tasa}, intereses "
             f"{loan.interest_mode.value}, amortización {loan.amortization.value}{ltv}",
             {},
@@ -1074,7 +1086,9 @@ def _write_case_inputs(col: _Column, scenario: Scenario, options: ReportOptions)
     col.title("Con qué se construyó esta proyección")
     col.heading("ESCENARIO")
     for label, value in (
-        ("Capital inicial", _money(scenario.initial_value, options)),
+        ("Capital inicial", _capital(scenario.initial_value, scenario, options)
+         + (f" (escrito como {format_display(scenario.initial_value)} COP)"
+            if scenario.initial_currency == "COP" and not options.fx_spot else "")),
         ("Horizonte", f"{scenario.horizon} años"),
         ("Inflación anual", f"{scenario.inflation:.2%}"),
     ):
@@ -1421,18 +1435,18 @@ def _goals_rows(scenario: Scenario, result: SimulationResult,
     Se mide sobre la corrida en su moneda original: la meta se define en esa
     moneda, y la conversión a COP no cambia ninguna probabilidad.
     """
-    columnas = ["Meta", "Año", "Monto", "Unidad", "Prioridad", *result.names]
+    columnas = ["Meta", "Año", "Monto", "Unidad", *result.names]
     filas = []
     for goal in scenario.goals:
         fila = [
             goal.name,
             "final" if goal.year is None else str(goal.year),
-            _money(goal.amount, options),
+            f"{format_number(goal.amount)} {goal.currency}" if goal.currency != "USD"
+            else _money(goal.amount, options),
             "moneda de hoy" if goal.real else "nominal",
-            goal.priority.value,
         ]
         for strategy in result.strategies:
-            p = goal_probability(strategy, goal)
+            p = goal_probability(strategy, goal, scenario.peso)
             fila.append("fuera del horizonte" if np.isnan(p) else f"{p:.1%}")
         filas.append(fila)
     return columnas, filas

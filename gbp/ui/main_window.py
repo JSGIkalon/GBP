@@ -37,8 +37,10 @@ from ..io.caseio import (
 )
 from ..io.report import build_report
 from ..model.correlation import CorrelationMatrix
+from ..model.currency import BASE_CURRENCY, describe_rate
 from ..model.custom_assets import custom_pairs, extend_correlations, resolver_for
 from .brand import app_icon, wordmark_pixmap
+from .clock_window import ClockWindow
 from .kpi_cards import KpiRow
 from .sidebar import Sidebar, section_of
 from .custom_asset_dialog import merge_custom_assets
@@ -50,7 +52,9 @@ from .panels.scenario_panel import ScenarioPanel
 from .panels.settings_panel import SettingsPanel
 from .panels.strategies_panel import StrategiesPanel
 from .sample_case import build_sample_case, empty_case
+from .optimizer_dialog import OptimizerDialog
 from .solver_dialog import SolverDialog
+from .strategy_filter import StrategyFilter
 from .theme import (
     INK_SOFT,
     STYLESHEET,
@@ -104,12 +108,14 @@ class MainWindow(QMainWindow):
         # explican con esta copia, no con el caso vivo, que el usuario puede
         # haber seguido editando después de correr.
         self._run_scenario = None
+        self._run_market = None
         self._pending_scenario = None
         self._export_thread = None
         self._export_worker = None
         # Último resultado del solver y la firma del caso sobre el que se hizo.
         self._last_solve = None
         self._last_solve_signature = None
+        self._clock_window = None
 
         self._session_timer = QTimer(self)
         self._session_timer.setSingleShot(True)
@@ -197,6 +203,7 @@ class MainWindow(QMainWindow):
         self.assets_panel.changed.connect(self._on_assets_changed)
         self.settings_panel.changed.connect(self._on_settings_changed)
         self.settings_panel.view_changed.connect(self._apply_result_view)
+        self.settings_panel.restored.connect(self._on_settings_restored)
 
         # --- Barra lateral: otra puerta a las mismas pestañas -------------
         # La barra lateral es la única navegación: las pestañas siguen ahí
@@ -296,6 +303,17 @@ class MainWindow(QMainWindow):
         )
         run_bar.addWidget(self.export_button)
 
+        self.optimize_button = QPushButton("Optimizar portafolio")
+        self.optimize_button.setObjectName("exportButton")
+        self.optimize_button.setMinimumHeight(40)
+        self.optimize_button.setToolTip(
+            "Pesos que maximizan el retorno, minimizan la volatilidad o maximizan "
+            "retorno/volatilidad con los activos que elijas. No cambia nada hasta "
+            "que apliques una alternativa."
+        )
+        self.optimize_button.clicked.connect(self.open_optimizer)
+        run_bar.addWidget(self.optimize_button)
+
         # La barra muestra el porcentaje: una corrida de 200.000 caminos tarda
         # lo suficiente como para que "está corriendo" no baste.
         self.progress = QProgressBar()
@@ -323,19 +341,29 @@ class MainWindow(QMainWindow):
         self.kpis.setObjectName("workArea")
         right_layout.addWidget(self.kpis)
 
-        # Aviso fijo de moneda: con la vista en COP activa (se activa en
-        # Ajustes) tiene que ser imposible leer una cifra sin saber que está en
-        # pesos. Oculto en la vista normal, así que quien no la usa no ve nada.
+        # Aviso fijo de moneda: en qué moneda se leen las cifras, cuál es la
+        # base de los cálculos y qué tasa se usa. Siempre visible: tiene que ser
+        # imposible leer una cifra sin saber en qué moneda está.
         self.currency_banner = QLabel("")
         self.currency_banner.setObjectName("currencyBanner")
         self.currency_banner.setWordWrap(True)
-        self.currency_banner.setVisible(False)
         right_layout.addWidget(self.currency_banner)
 
         results_card = QFrame()
         results_card.setObjectName("card")
         results_layout = QVBoxLayout(results_card)
-        results_layout.setContentsMargins(10, 6, 10, 10)
+        results_layout.setContentsMargins(10, 8, 10, 10)
+        results_layout.setSpacing(6)
+        # Qué estrategias se ven: una fila compacta que salta de línea si no
+        # cabe, para no quitarle alto a los gráficos.
+        self.strategy_filter = StrategyFilter()
+        self.strategy_filter.selection_changed.connect(self._on_visible_changed)
+        results_layout.addWidget(self.strategy_filter)
+        self.optimized_banner = QLabel("")
+        self.optimized_banner.setObjectName("optimizedBanner")
+        self.optimized_banner.setWordWrap(True)
+        self.optimized_banner.setVisible(False)
+        results_layout.addWidget(self.optimized_banner)
         self.results = ResultsPanel(settings=self.settings)
         self.results.setObjectName("resultsTabs")
         self.results.setDocumentMode(True)
@@ -377,6 +405,41 @@ class MainWindow(QMainWindow):
         peso = self.scenario.peso
         view_peso = peso if (peso is not None and self.settings.show_cop) else None
         self.kpis.update_from(self.scenario, self.results.result, view_peso)
+        self._update_optimized_banner()
+
+    def _sync_strategy_filter(self):
+        """El filtro sigue a las estrategias del caso, conservando la selección."""
+        names = [s.name for s in self.scenario.strategies]
+        optimized = {s.name: s.optimization for s in self.scenario.strategies
+                     if s.optimization}
+        if (names, optimized) != getattr(self, "_filter_state", None):
+            self._filter_state = (names, optimized)
+            self.strategy_filter.blockSignals(True)
+            self.strategy_filter.set_strategies(names, optimized)
+            self.strategy_filter.blockSignals(False)
+            self.results.set_hidden_strategies(self.strategy_filter.hidden)
+            self._update_kpis()
+
+    def _on_visible_changed(self, _names: list):
+        self.results.set_hidden_strategies(self.strategy_filter.hidden)
+        self._update_kpis()
+
+    @property
+    def visible_strategies(self) -> list[str]:
+        hidden = set(self.strategy_filter.hidden)
+        return [s.name for s in self.scenario.strategies if s.name not in hidden]
+
+    def _update_optimized_banner(self):
+        """Avisa si alguna estrategia visible lleva pesos de una optimización."""
+        hidden = set(self.strategy_filter.hidden)
+        marked = [f"«{s.name}» ({s.optimization.lower()})" for s in self.scenario.strategies
+                  if s.optimization and s.name not in hidden]
+        self.optimized_banner.setVisible(bool(marked))
+        if marked:
+            self.optimized_banner.setText(
+                "★ Portafolio optimizado: " + ", ".join(marked) + ". Los pesos se pueden "
+                "seguir editando a mano en Estrategias; al hacerlo deja de marcarse."
+            )
 
     def _build_menu(self):
         file_menu = self.menuBar().addMenu("&Archivo")
@@ -427,11 +490,22 @@ class MainWindow(QMainWindow):
         solver_action.triggered.connect(self.open_solver)
         run_menu.addAction(solver_action)
 
+        optimizer_action = QAction("&Optimizar portafolio…", self)
+        optimizer_action.setShortcut("Ctrl+Shift+O")
+        optimizer_action.triggered.connect(self.open_optimizer)
+        run_menu.addAction(optimizer_action)
+
         run_menu.addSeparator()
         # Se deja la acción también en el menú, pero el botón vive junto a los
         # resultados: es ahí donde se decide exportar, no en Archivo.
         self.export_action.setShortcut("Ctrl+E")
         run_menu.addAction(self.export_action)
+
+        view_menu = self.menuBar().addMenu("&Ver")
+        clock_action = QAction("&Reloj", self)
+        clock_action.setShortcut("Ctrl+Shift+C")
+        clock_action.triggered.connect(self.open_clock)
+        view_menu.addAction(clock_action)
 
         help_menu = self.menuBar().addMenu("A&yuda")
         about_action = QAction("&Acerca de GBP", self)
@@ -439,6 +513,16 @@ class MainWindow(QMainWindow):
         help_menu.addAction(about_action)
 
     # ------------------------------------------------------------------
+    def open_clock(self):
+        if self._clock_window is None:
+            self._clock_window = ClockWindow(self)
+            self._clock_window.destroyed.connect(
+                lambda *_args: setattr(self, "_clock_window", None)
+            )
+        self._clock_window.show()
+        self._clock_window.raise_()
+        self._clock_window.activateWindow()
+
     def _on_scenario_changed(self):
         self.strategies_panel.capital_panel.refresh_inherited()
         # El total de flujos depende de la inflación y, con flujos en COP, de
@@ -451,19 +535,19 @@ class MainWindow(QMainWindow):
 
     def _apply_result_view(self, *_):
         """Moneda (de Ajustes) y metas (del caso vivo); no piden volver a simular."""
+        self.settings_panel.set_horizon(self.scenario.horizon)
         peso = self.scenario.peso
         self.settings_panel.set_cop_available(peso is not None)
         view_peso = peso if (peso is not None and self.settings.show_cop) else None
         scale_changed = display_scale() != self.settings.display_scale
         set_display_scale(self.settings.display_scale)
-        unidad = amount_unit("COP" if view_peso else "")
-        self.currency_banner.setVisible(bool(unidad))
-        if unidad:
-            # Solo la unidad de lectura: el aviso dice en qué están las cifras
-            # y nada más.
-            self.currency_banner.setText(f"Cifras en {unidad}")
+        unidad = amount_unit("COP" if view_peso else BASE_CURRENCY)
+        texto = f"Cifras en {unidad} · base de cálculo: {BASE_CURRENCY}"
+        if peso is not None:
+            texto += f" · {describe_rate(peso)}"
+        self.currency_banner.setText(texto)
         self.results.set_view(view_peso, self.scenario.inflation, self.scenario.goals,
-                              force=scale_changed)
+                              force=scale_changed, case_peso=peso)
         self._update_kpis()
 
     # ------------------------------------------------------------------
@@ -474,6 +558,53 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Revisa el caso", str(exc))
             return
         SolverDialog(self).exec()
+
+    def open_optimizer(self):
+        if not self.scenario.strategies:
+            QMessageBox.information(
+                self, "Sin estrategias",
+                "Crea al menos una estrategia en Estrategias para poder optimizarla.",
+            )
+            return
+        OptimizerDialog(self).exec()
+
+    def apply_optimization(self, strategy_name: str, weights: dict, label: str,
+                           as_new: bool = False, simulate: bool = True) -> str:
+        """Lleva los pesos de una alternativa al caso y vuelve a simular.
+
+        Solo cambian los pesos (y la marca de optimizado): flujos, crédito y
+        capital de la estrategia se conservan. Con `as_new` se agrega una copia
+        con los pesos nuevos y la original queda intacta. Devuelve el nombre de
+        la estrategia que quedó con los pesos.
+        """
+        from ..model.allocation import Allocation
+
+        strategy = next(s for s in self.scenario.strategies if s.name == strategy_name)
+        clean = {k: float(v) for k, v in weights.items() if v > 0}
+        total = sum(clean.values())
+        clean = {k: v / total for k, v in clean.items()}
+        if as_new:
+            existing = {s.name for s in self.scenario.strategies}
+            base = f"{strategy_name} · {label.lower()}"
+            name, i = base, 2
+            while name in existing:
+                name, i = f"{base} ({i})", i + 1
+            target = strategy.copy(name)
+            self.scenario.strategies.append(target)
+        else:
+            target = strategy
+        target.allocation = Allocation(target.name, clean)
+        target.optimization = label
+        self.after_external_edit()
+        self._sync_strategy_filter()
+        if target.name not in self.strategy_filter.selected:
+            self.strategy_filter.set_selected(self.strategy_filter.selected + [target.name])
+        self.status.setText(f"Se aplicó «{label}» a «{target.name}».")
+        if simulate:
+            # Gráficos, tablas, indicadores y probabilidad de éxito se
+            # recalculan con una corrida nueva, no con una estimación.
+            self.run_simulation()
+        return target.name
 
     @staticmethod
     def _solve_signature(scenario) -> dict:
@@ -507,13 +638,46 @@ class MainWindow(QMainWindow):
         data.pop("goals", None)
         return data
 
+    def _market_signature(self, scenario=None) -> tuple:
+        """Los supuestos de mercado que usa el caso: activos y correlaciones.
+
+        Sin esto, editar un activo propio después de simular dejaba en pantalla
+        —y en el PDF— resultados calculados con los supuestos anteriores.
+        """
+        import hashlib
+
+        scenario = scenario or self.scenario
+        names = scenario.asset_names
+        assets = []
+        for name in names:
+            try:
+                a = self.cmas.by_name(name)
+            except KeyError:
+                assets.append((name, None))
+                continue
+            assets.append((
+                a.name, a.compound_return, a.volatility, a.yield_, a.currency,
+                a.asset_class, getattr(a, "correlation_source", None),
+            ))
+        try:
+            corr = self.correlations.subset(names)
+            digest = hashlib.sha1(corr.tobytes()).hexdigest()
+        except (KeyError, ValueError):
+            digest = None
+        return tuple(assets), digest
+
     def results_are_stale(self) -> bool:
-        """Si el caso cambió, en algo que se simula, desde la corrida mostrada."""
+        """Si el caso o los supuestos de mercado cambiaron desde la corrida mostrada."""
         if self._run_scenario is None:
             return False
-        return (
+        if (
             self._simulation_signature(self.scenario)
             != self._simulation_signature(self._run_scenario)
+        ):
+            return True
+        return (
+            self._run_market is not None
+            and self._market_signature() != self._run_market
         )
 
     def _flag_stale_results(self):
@@ -563,6 +727,11 @@ class MainWindow(QMainWindow):
         # El resolvedor pudo cambiar la clase de un activo: la asignación
         # agrupada cambia aunque los pesos no.
         self._refresh_dependent_views(force=True)
+        self._flag_stale_results()
+
+    def _on_settings_restored(self):
+        self.results.set_chart_kind(self.settings.chart_kind)
+        self.results._toggle_percentile_labels(self.settings.show_percentile_labels)
 
     def _on_settings_changed(self):
         # El número de simulaciones no cambia lo que se ve: solo la próxima
@@ -581,6 +750,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_dependent_views(self, force: bool = False):
         self._refresh_timer.stop()
+        self._sync_strategy_filter()
         self.correlation_panel.set_used_assets(self.scenario.asset_names)
         # La asignación solo cambia con los pesos o los nombres de estrategia;
         # el resto de las ediciones (flujos, crédito, inflación) no la tocan.
@@ -607,6 +777,7 @@ class MainWindow(QMainWindow):
         )
         self.results.clear()
         self._run_scenario = None
+        self._run_market = None
         self._apply_result_view()
         self.export_action.setEnabled(False)  # el informe siempre describe una corrida
         self._refresh_dependent_views(force=True)
@@ -711,6 +882,35 @@ class MainWindow(QMainWindow):
         self._refresh_dependent_views()
 
     # ------------------------------------------------------------------
+    def _memory_ok(self) -> bool:
+        """Evita lanzar una corrida que podría agotar la memoria y cerrar la app."""
+        from ..engine.montecarlo import (
+            MEMORY_BLOCK_BYTES, MEMORY_WARN_BYTES, estimate_memory_bytes,
+        )
+
+        need = estimate_memory_bytes(
+            self.settings.n_paths, len(self.scenario.asset_names) + 1,
+            self.scenario.horizon, len(self.scenario.strategies),
+        )
+        gb = need / 1024**3
+        if need > MEMORY_BLOCK_BYTES:
+            QMessageBox.warning(
+                self, "Demasiadas simulaciones",
+                f"Con {format_number(self.settings.n_paths)} simulaciones la corrida "
+                f"necesitaría unos {gb:.1f} GB de memoria y podría cerrar la app. "
+                "Baja el número de simulaciones en Configuración (10.000 es el estándar).",
+            )
+            return False
+        if need > MEMORY_WARN_BYTES:
+            return QMessageBox.question(
+                self, "Corrida pesada",
+                f"Esta corrida necesitaría unos {gb:.1f} GB de memoria y puede tardar "
+                "o dejar el equipo lento. ¿Correrla de todos modos?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            ) == QMessageBox.StandardButton.Yes
+        return True
+
     def run_simulation(self):
         if self._thread is not None and self._thread.isRunning():
             return
@@ -723,6 +923,8 @@ class MainWindow(QMainWindow):
         except ValueError as exc:
             QMessageBox.warning(self, "Revisa el caso", str(exc))
             return
+        if not self._memory_ok():
+            return
 
         self.run_button.setEnabled(False)
         self.export_action.setEnabled(False)
@@ -731,6 +933,7 @@ class MainWindow(QMainWindow):
         self.status.setText(f"Corriendo {format_number(self.settings.n_paths)} simulaciones…")
 
         self._pending_scenario = deepcopy(self.scenario)
+        self._pending_market = self._market_signature(self._pending_scenario)
         self._thread, self._worker = start_simulation(
             self,
             self._pending_scenario,
@@ -757,6 +960,10 @@ class MainWindow(QMainWindow):
 
     def _on_finished(self, result):
         self._run_scenario = self._pending_scenario
+        self._run_market = getattr(self, "_pending_market", None) or (
+            self._market_signature(self._run_scenario) if self._run_scenario else None
+        )
+        self._pending_market = None
         self.results.show_result(result, self.settings, result.horizon)
         self._update_kpis()
         self.run_button.setEnabled(True)

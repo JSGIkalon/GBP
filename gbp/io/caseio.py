@@ -52,7 +52,7 @@ from pathlib import Path
 
 from ..model.allocation import Allocation
 from ..model.cashflows import CashFlow, FlowBasis, FlowKind
-from ..model.goals import Goal, GoalPriority
+from ..model.goals import Goal
 from ..model.leverage import Amortization, InterestMode, LoanTerms, RateMode
 from ..model.scenario import PesoAssumptions, Scenario
 from ..model.strategy import Strategy
@@ -78,6 +78,7 @@ def _loan_to_dict(loan: LoanTerms) -> dict:
         "amortization": loan.amortization.value,
         "max_ltv": loan.max_ltv,
         "target_ltv": loan.target_ltv,
+        **({"currency": loan.currency} if loan.currency != "USD" else {}),
     }
 
 
@@ -94,6 +95,7 @@ def _loan_from_dict(payload: dict) -> LoanTerms:
         amortization=Amortization(payload.get("amortization", Amortization.BULLET.value)),
         max_ltv=payload.get("max_ltv"),
         target_ltv=payload.get("target_ltv"),
+        currency=payload.get("currency", "USD"),
     )
 
 
@@ -192,7 +194,7 @@ def _goal_to_dict(goal: Goal) -> dict:
         "amount": goal.amount,
         "year": goal.year,
         "real": goal.real,
-        "priority": goal.priority.value,
+        **({"currency": goal.currency} if goal.currency != "USD" else {}),
     }
 
 
@@ -203,7 +205,9 @@ def _goal_from_dict(payload: dict) -> Goal:
         amount=float(payload.get("amount", 0.0)),
         year=int(year) if year is not None else None,
         real=bool(payload.get("real", True)),
-        priority=GoalPriority(payload.get("priority", GoalPriority.IMPORTANT.value)),
+        currency=payload.get("currency", "USD"),
+        # Los casos guardados antes de la 0.5 traen "priority": era solo una
+        # etiqueta, sin efecto en ningún cálculo, y se ignora al leerlos.
     )
 
 
@@ -224,6 +228,7 @@ def _scenario_to_dict(scenario: Scenario) -> dict:
         "initial_value": scenario.initial_value,
         "horizon": scenario.horizon,
         "inflation": scenario.inflation,
+        "initial_currency": scenario.initial_currency,
         "peso": (
             {
                 "spot": scenario.peso.spot,
@@ -240,6 +245,7 @@ def _scenario_to_dict(scenario: Scenario) -> dict:
                 "cashflows": [_flow_to_dict(f) for f in s.cashflows],
                 "loan": _loan_to_dict(s.loan) if s.loan else None,
                 "initial_value": s.initial_value,
+                "optimization": s.optimization,
             }
             for s in scenario.strategies
         ],
@@ -274,6 +280,7 @@ def from_dict(payload: dict) -> Scenario:
                         if s.get("initial_value") is not None
                         else None
                     ),
+                    optimization=s.get("optimization") or None,
                 )
                 for s in data.get("strategies", [])
             ]
@@ -286,6 +293,7 @@ def from_dict(payload: dict) -> Scenario:
             strategies=strategies,
             goals=[_goal_from_dict(g) for g in data.get("goals", [])],
             peso=_peso_from_dict(data.get("peso")),
+            initial_currency=str(data.get("initial_currency", "USD")),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise CaseFormatError(f"El caso está dañado o incompleto: {exc}") from exc

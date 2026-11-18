@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .assets import CMASet
+from .currency import BASE_CURRENCY, CurrencyError, check_currency, check_rate, factor_to_base
 from .goals import Goal
 from .strategy import Strategy
 
@@ -84,8 +85,10 @@ class PesoAssumptions:
     inflation: float | None = None
 
     def __post_init__(self) -> None:
-        if self.spot <= 0:
-            raise ValueError("La tasa USD/COP debe ser positiva.")
+        try:
+            self.spot = check_rate(self.spot)
+        except CurrencyError:
+            raise ValueError("La tasa USD/COP debe ser un número positivo.") from None
         if self.devaluation <= -1:
             raise ValueError("La devaluación anual debe ser mayor a -100%.")
 
@@ -118,15 +121,37 @@ class Scenario:
     # Opcional: solo hace falta si el caso tiene activos o flujos en pesos, o
     # para ver los resultados en COP.
     peso: PesoAssumptions | None = None
+    # Moneda en que se escribe el capital inicial (el del escenario y el propio
+    # de cada estrategia). El motor lo lleva a la moneda base con la tasa
+    # inicial antes de simular: ver `gbp.model.currency`.
+    initial_currency: str = BASE_CURRENCY
 
     def __post_init__(self) -> None:
+        check_currency(self.initial_currency)
         if self.horizon < 1:
             raise ValueError("El horizonte debe ser de al menos un año.")
         if self.initial_value < 0:
             raise ValueError("El capital inicial no puede ser negativo.")
 
+    @property
+    def capital_factor(self) -> float:
+        """Factor que lleva el capital escrito a la moneda base (1.0 si ya es USD).
+
+        Levanta `CurrencyError` si el capital está en COP y no hay tasa.
+        """
+        return factor_to_base(self.initial_currency, self.peso)
+
+    def initial_in_base(self, strategy: Strategy | None = None) -> float:
+        """Capital inicial —el del escenario o el propio de la estrategia— en USD."""
+        raw = self.initial_value if strategy is None else strategy.resolved_initial(
+            self.initial_value
+        )
+        factor = self.capital_factor
+        return float(raw) if factor == 1.0 else float(raw) * factor
+
     def validate(self, cmas: CMASet) -> None:
         """Verifica que el caso se pueda simular con la librería de CMAs dada."""
+        check_currency(self.initial_currency)
         if not self.strategies:
             raise ValueError("Define al menos una estrategia para simular.")
 
@@ -189,6 +214,8 @@ class Scenario:
     def cop_items(self, cmas: CMASet) -> list[str]:
         """Activos y flujos del caso que están en pesos, por nombre."""
         items: list[str] = []
+        if self.initial_currency == "COP":
+            items.append("el capital inicial")
         for name in self.asset_names:
             try:
                 if cmas.by_name(name).currency == "COP":
@@ -197,6 +224,9 @@ class Scenario:
                 continue
         for strategy in self.strategies:
             items += [f.name for f in strategy.cashflows if f.currency == "COP"]
+            if strategy.has_loan and strategy.loan.currency == "COP":
+                items.append(strategy.loan.name)
+        items += [g.name for g in self.goals if g.currency == "COP"]
         return items
 
     @property

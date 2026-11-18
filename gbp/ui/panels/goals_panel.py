@@ -21,15 +21,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...model.goals import Goal, GoalPriority
+from ...model.goals import Goal
 from ..theme import (
     NOTE_STYLE,
     SECTION_STYLE,
     format_money,
 )
 
-COLUMNS = ["Meta", "Monto", "Año", "Moneda de hoy", "Prioridad"]
-COL_NAME, COL_AMOUNT, COL_YEAR, COL_REAL, COL_PRIORITY = range(5)
+COLUMNS = ["Meta", "Monto", "Moneda", "Año", "Moneda de hoy"]
+COL_NAME, COL_AMOUNT, COL_CURRENCY, COL_YEAR, COL_REAL = range(5)
 FINAL = "final"
 
 
@@ -40,6 +40,7 @@ class GoalsPanel(QWidget):
         super().__init__(parent)
         self.goals = goals
         self._loading = False
+        self.horizon: int | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -65,14 +66,17 @@ class GoalsPanel(QWidget):
         header.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
         for col in range(1, len(COLUMNS)):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-        # El combo de prioridad no tiene contenido que medir: sin ancho fijo
-        # quedaba cortado en «esencia…».
-        header.setSectionResizeMode(COL_PRIORITY, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(COL_PRIORITY, 120)
         self.table.setMinimumHeight(120)
         self.table.setMaximumHeight(200)
         self.table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self.table)
+
+        # Metas cuyo año cae después del horizonte: no se ajustan solas, se avisa.
+        self.horizon_note = QLabel("")
+        self.horizon_note.setWordWrap(True)
+        self.horizon_note.setStyleSheet(NOTE_STYLE)
+        self.horizon_note.setVisible(False)
+        layout.addWidget(self.horizon_note)
 
         buttons = QHBoxLayout()
         add = QPushButton("Agregar meta")
@@ -93,6 +97,24 @@ class GoalsPanel(QWidget):
         for row, goal in enumerate(goals):
             self._set_row(row, goal)
         self._loading = False
+        self._update_horizon_note()
+
+    def set_horizon(self, horizon: int):
+        self.horizon = horizon
+        self._update_horizon_note()
+
+    def _update_horizon_note(self):
+        fuera = [
+            g for g in self.goals
+            if self.horizon and g.year is not None and g.year > self.horizon
+        ]
+        if fuera:
+            self.horizon_note.setText(
+                "Fuera del horizonte de " + f"{self.horizon} años, no se evalúan: "
+                + ", ".join(f"{g.name} (año {g.year})" for g in fuera)
+                + ". Cambia su año o alarga el horizonte."
+            )
+        self.horizon_note.setVisible(bool(fuera))
 
     def _set_row(self, row: int, goal: Goal):
         values = {
@@ -108,8 +130,12 @@ class GoalsPanel(QWidget):
                 item.setToolTip("Un año del horizonte, o «final» para medirla en el último año.")
             self.table.setItem(row, col, item)
 
+        # Solo una casilla: sin quitarle `ItemIsEditable`, un doble clic abría
+        # un campo de texto vacío debajo de la casilla que no servía para nada.
         real = QTableWidgetItem()
-        real.setFlags(real.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        real.setFlags(
+            (real.flags() | Qt.ItemFlag.ItemIsUserCheckable) & ~Qt.ItemFlag.ItemIsEditable
+        )
         real.setCheckState(Qt.CheckState.Checked if goal.real else Qt.CheckState.Unchecked)
         real.setToolTip(
             "Marcado: el monto está en poder adquisitivo de hoy. Sin marcar: en "
@@ -117,11 +143,23 @@ class GoalsPanel(QWidget):
         )
         self.table.setItem(row, COL_REAL, real)
 
-        priority = QComboBox()
-        priority.addItems([p.value for p in GoalPriority])
-        priority.setCurrentText(goal.priority.value)
-        priority.currentTextChanged.connect(lambda text, r=row: self._set_priority(r, text))
-        self.table.setCellWidget(row, COL_PRIORITY, priority)
+        currency = QComboBox()
+        currency.addItems(["USD", "COP"])
+        currency.setCurrentText(goal.currency)
+        currency.setToolTip(
+            "COP: el monto se convierte a USD con la tasa y la devaluación de la "
+            "sección «Pesos colombianos» de Escenario."
+        )
+        currency.currentTextChanged.connect(
+            lambda code, g=goal: self._set_currency(g, code)
+        )
+        self.table.setCellWidget(row, COL_CURRENCY, currency)
+
+    def _set_currency(self, goal: Goal, code: str):
+        if self._loading or goal.currency == code:
+            return
+        goal.currency = code
+        self.changed.emit()
 
     def _add(self):
         self.goals.append(Goal(name=f"Meta {len(self.goals) + 1}", amount=0.0))
@@ -134,12 +172,6 @@ class GoalsPanel(QWidget):
             del self.goals[row]
             self.reload(self.goals)
             self.changed.emit()
-
-    def _set_priority(self, row: int, text: str):
-        if self._loading or row >= len(self.goals):
-            return
-        self.goals[row].priority = GoalPriority(text)
-        self.changed.emit()
 
     def _on_item_changed(self, item: QTableWidgetItem):
         if self._loading:
@@ -173,4 +205,5 @@ class GoalsPanel(QWidget):
         self._loading = True
         self._set_row(row, goal)
         self._loading = False
+        self._update_horizon_note()
         self.changed.emit()

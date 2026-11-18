@@ -38,6 +38,8 @@ class SettingsPanel(QWidget):
     changed = Signal()
     # Tasa o vista en COP: se redibuja lo que se ve, sin tocar la corrida.
     view_changed = Signal()
+    # «Restaurar»: también vuelven el tipo de gráfico y las etiquetas.
+    restored = Signal()
 
     def __init__(self, settings: SimulationSettings, parent=None):
         super().__init__(parent)
@@ -69,6 +71,13 @@ class SettingsPanel(QWidget):
         self.milestones.setPlaceholderText("5, 10, 15, 20, 25, 30")
         self.milestones.editingFinished.connect(self._on_change)
         form.addRow("Años hito a graficar", self.milestones)
+        # Avisa qué se descartó o queda fuera del horizonte, en vez de ignorarlo.
+        self.milestone_note = QLabel("")
+        self.milestone_note.setWordWrap(True)
+        self.milestone_note.setStyleSheet(NOTE_STYLE)
+        self.milestone_note.setVisible(False)
+        form.addRow("", self.milestone_note)
+        self.horizon: int | None = None
 
         layout.addLayout(form)
 
@@ -117,7 +126,11 @@ class SettingsPanel(QWidget):
         self.path_label.setStyleSheet(NOTE_STYLE)
         layout.addWidget(self.path_label)
 
-        reset = QPushButton("Restaurar valores por defecto")
+        reset = QPushButton("Restaurar todos los ajustes por defecto")
+        reset.setToolTip(
+            "Simulaciones, años hito, escala, vista en COP, tipo de gráfico y "
+            "etiquetas de percentiles. No toca el caso del cliente."
+        )
         reset.clicked.connect(self._reset)
         layout.addWidget(reset)
         layout.addStretch(1)
@@ -164,20 +177,55 @@ class SettingsPanel(QWidget):
             pass
         self.view_changed.emit()
 
-    def _parse_milestones(self) -> list[int]:
-        raw = self.milestones.text().replace(";", ",").split(",")
-        years = []
-        for chunk in raw:
+    @staticmethod
+    def parse_milestones(text: str) -> tuple[list[int], list[str]]:
+        """Años hito válidos y las entradas descartadas, tal como se escribieron."""
+        years, rejected = [], []
+        for chunk in text.replace(";", ",").split(","):
             chunk = chunk.strip()
             if not chunk:
                 continue
             try:
-                year = int(float(chunk))
+                value = float(chunk)
             except ValueError:
+                rejected.append(chunk)
                 continue
-            if year >= 1:
-                years.append(year)
-        return sorted(set(years)) or [5, 10, 15, 20, 25, 30]
+            if value != int(value) or value < 1:
+                rejected.append(chunk)
+                continue
+            years.append(int(value))
+        return sorted(set(years)), rejected
+
+    def set_horizon(self, horizon: int):
+        """El horizonte del caso abierto, para avisar de hitos que no caben."""
+        self.horizon = horizon
+        self._show_milestone_note(self.settings.milestone_years, [])
+
+    def _show_milestone_note(self, years: list[int], rejected: list[str]):
+        parts = []
+        if rejected:
+            parts.append("Se descartó: " + ", ".join(f"«{r}»" for r in rejected)
+                         + " (solo años enteros desde 1).")
+        if self.horizon:
+            beyond = [y for y in years if y > self.horizon]
+            if beyond:
+                parts.append(
+                    "Fuera del horizonte de " + f"{self.horizon} años, no se grafican: "
+                    + ", ".join(str(y) for y in beyond) + "."
+                )
+        self.milestone_note.setText(" ".join(parts))
+        self.milestone_note.setVisible(bool(parts))
+
+    def _parse_milestones(self) -> list[int]:
+        years, rejected = self.parse_milestones(self.milestones.text())
+        if not years:
+            # Nada válido: se conservan los anteriores, no los de fábrica.
+            years = list(self.settings.milestone_years)
+            if self.milestones.text().strip():
+                rejected = rejected or [self.milestones.text().strip()]
+            self.milestones.setText(", ".join(str(y) for y in years))
+        self._show_milestone_note(years, rejected)
+        return years
 
     def commit(self):
         """Aplica lo que esté escrito aunque el campo no haya perdido el foco.
@@ -206,7 +254,17 @@ class SettingsPanel(QWidget):
         defaults = SimulationSettings()
         self.settings.n_paths = defaults.n_paths
         self.settings.milestone_years = list(defaults.milestone_years)
-        # La tasa se conserva: es un dato, no una preferencia que «restaurar».
-        library.save_settings(self.settings)
+        self.settings.show_cop = defaults.show_cop
+        self.settings.display_scale = defaults.display_scale
+        self.settings.chart_kind = defaults.chart_kind
+        self.settings.show_percentile_labels = defaults.show_percentile_labels
+        # La tasa se conserva: es un dato del caso, no una preferencia.
+        try:
+            library.save_settings(self.settings)
+        except OSError:
+            pass
         self.reload(self.settings)
+        self._show_milestone_note(self.settings.milestone_years, [])
         self.changed.emit()
+        self.restored.emit()
+        self.view_changed.emit()

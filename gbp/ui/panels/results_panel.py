@@ -13,6 +13,8 @@ significado de todo lo demás sin decirlo.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
@@ -30,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...model.goals import goal_probability
+from ...model.goals import goal_amount_usd, goal_probability
 from ...model.results import SimulationResult
 from ...model.scenario import Scenario, SimulationSettings
 from ..charts.allocation_chart import allocation_comparison, draw_allocation_chart
@@ -38,6 +40,7 @@ from ..charts.box_chart import distribution_table_rows
 from ..charts.canvas import ChartCanvas
 from ..charts.debt_chart import draw_debt_chart
 from ..charts.distribution import BOXES, CHART_KINDS, draw_distribution, normalize_kind
+from ..help_texts import SUCCESS_TOOLTIP
 from ..table_copy import enable_copy
 from ..theme import (
     INK_SOFT,
@@ -49,6 +52,10 @@ from ..theme import (
 
 TOTAL_ROW_BG = "#EEF3F8"
 EMPTY = "Carga los datos del caso y pulsa «Correr simulación»."
+NO_SELECTION = (
+    "No hay estrategias seleccionadas. Elige al menos una en «Ver estrategias», "
+    "arriba de los resultados."
+)
 
 
 def _table(columns: list[str]) -> QTableWidget:
@@ -107,9 +114,14 @@ class ResultsPanel(QTabWidget):
         self.result: SimulationResult | None = None
         self.fx_rate: float | None = None
         self.peso = None
+        self.case_peso = None
         self.inflation = 0.0
         self._view_key = None
         self.goals: list = []
+        # Estrategias ocultas por el filtro de lectura. Se guardan las ocultas y
+        # no las visibles para que una estrategia nueva se vea sin más.
+        self.hidden: set[str] = set()
+        self._allocation_args = None
         # Los ajustes de la app. Las dos preferencias de lectura del gráfico
         # —tipo y etiquetas de percentiles— se escriben ahí al cambiarlas, y la
         # ventana principal los guarda al cerrar: se recuerdan entre sesiones.
@@ -324,13 +336,38 @@ class ResultsPanel(QTabWidget):
             table.setRowCount(0)
         self.flows_selector.clear()
 
+    def set_hidden_strategies(self, names):
+        """Qué estrategias no se ven. Filtra lo que se muestra; no recalcula nada."""
+        self.hidden = set(names or ())
+        if self._allocation_args is not None:
+            self.show_allocation(*self._allocation_args)
+        if self.base_result is not None:
+            self._render()
+
+    def _visible_scenario(self, scenario: Scenario) -> Scenario:
+        if not self.hidden:
+            return scenario
+        return replace(scenario, strategies=[s for s in scenario.strategies
+                                             if s.name not in self.hidden])
+
     def show_allocation(self, scenario: Scenario, resolver=None):
         """La asignación no depende de la simulación: se ve sin haberla corrido.
 
         Es lo que hace útil la pestaña mientras se arma el caso: los pesos se
         editan al lado y aquí se ve de inmediato en qué queda el reparto.
         """
+        self._allocation_args = (scenario, resolver)
+        scenario = self._visible_scenario(scenario)
+        if not scenario.strategies and self.hidden:
+            self.allocation_canvas.set_redraw(None)
+            self.allocation_canvas.show_message(NO_SELECTION)
+            self.allocation_table.setRowCount(0)
+            return
         draw_allocation_chart(self.allocation_canvas, scenario, resolver)
+        # Gráficos responsivos: con otro tamaño se vuelve a maquetar.
+        self.allocation_canvas.set_redraw(
+            lambda: draw_allocation_chart(self.allocation_canvas, scenario, resolver)
+        )
         names, rows = allocation_comparison(scenario, resolver)
         table = self.allocation_table
         table.setColumnCount(2 + len(names))
@@ -366,7 +403,8 @@ class ResultsPanel(QTabWidget):
         self.years = settings.milestones_within(horizon)
         self._render()
 
-    def set_view(self, peso, inflation: float, goals: list, force: bool = False):
+    def set_view(self, peso, inflation: float, goals: list, force: bool = False,
+                 case_peso=None):
         """Moneda de lectura y metas del caso, que no requieren volver a simular.
 
         `peso` es `None` para ver en USD, o los supuestos del peso para ver en
@@ -381,6 +419,9 @@ class ResultsPanel(QTabWidget):
         self.inflation = inflation
         self.fx_rate = peso.spot if peso is not None else None
         self.goals = goals
+        # Los supuestos del peso del caso, aunque la vista sea en USD: las
+        # metas en COP los necesitan para convertirse.
+        self.case_peso = case_peso if case_peso is not None else peso
         self._sync_goals_tab()
         if self.base_result is None:
             return
@@ -400,7 +441,12 @@ class ResultsPanel(QTabWidget):
         result = self.base_result
         if self.peso is not None:
             result = result.in_currency(self.peso, self.inflation)
+        if self.hidden:
+            result = result.subset([n for n in result.names if n not in self.hidden])
         self.result = result
+        if not len(result):
+            self._show_no_selection()
+            return
 
         self._draw_distributions()
         for table, real in ((self.range_table, False), (self.real_table, True)):
@@ -413,12 +459,24 @@ class ResultsPanel(QTabWidget):
         self._show_flows_selector(result)
         self._show_goals()
 
+    def _show_no_selection(self):
+        """Ninguna estrategia elegida: un mensaje claro y tablas vacías."""
+        for canvas in (self.box_canvas, self.real_canvas, self.debt_canvas):
+            canvas.set_redraw(None)
+            canvas.show_message(NO_SELECTION)
+        for table in (self.range_table, self.real_table, self.summary_table,
+                      self.debt_table, self.flows_table, self.goals_table):
+            table.setRowCount(0)
+        self.flows_selector.blockSignals(True)
+        self.flows_selector.clear()
+        self.flows_selector.blockSignals(False)
+
     def _show_goals(self):
         if not self.goals or self.result is None:
             self.goals_table.setRowCount(0)
             return
         result = self.result
-        columns = ["Meta", "Año", "Monto", "Unidad", "Prioridad", *result.names]
+        columns = ["Meta", "Año", "Monto", "Unidad", *result.names]
         self.goals_table.setColumnCount(len(columns))
         self.goals_table.setHorizontalHeaderLabels(columns)
         header = self.goals_table.horizontalHeader()
@@ -432,16 +490,28 @@ class ResultsPanel(QTabWidget):
         for goal in self.goals:
             # La meta se define en USD; en la vista COP se muestra convertida
             # con la tasa de su año, en la misma unidad que el patrimonio.
-            factor = result.money_factor(goal.resolved_year(result.horizon), goal.real)
+            try:
+                amount, real = goal_amount_usd(goal, result.horizon, self.case_peso)
+            except ValueError:
+                amount, real = float("nan"), goal.real
+            factor = result.money_factor(goal.resolved_year(result.horizon), real)
+            unidad = "moneda de hoy" if goal.real else "nominal"
+            if goal.currency != "USD":
+                unidad += f" · escrita en {goal.currency}"
             row = {
                 "Meta": goal.name,
                 "Año": "final" if goal.year is None else goal.year,
-                "Monto": format_display(goal.amount * factor),
-                "Unidad": "moneda de hoy" if goal.real else "nominal",
-                "Prioridad": goal.priority.value,
+                "Monto": "falta tasa USD/COP" if np.isnan(amount)
+                         else format_display(amount * factor),
+                "Unidad": unidad,
             }
             for strategy in self.base_result.strategies:
-                p = goal_probability(strategy, goal)
+                if strategy.name not in result.names:
+                    continue
+                try:
+                    p = goal_probability(strategy, goal, self.case_peso)
+                except ValueError:
+                    p = float("nan")
                 row[strategy.name] = "fuera del horizonte" if np.isnan(p) else f"{p:.1%}"
             rows.append(row)
         _fill(self.goals_table, rows, columns)
@@ -517,7 +587,10 @@ class ResultsPanel(QTabWidget):
         for r, (label, getter) in enumerate(indicators):
             if amount_unit(result.currency) and label in money_rows:
                 label = f"{label} ({amount_unit(result.currency)})"
-            self.summary_table.setItem(r, 0, QTableWidgetItem(label))
+            label_item = QTableWidgetItem(label)
+            if label == "Probabilidad de éxito":
+                label_item.setToolTip(SUCCESS_TOOLTIP)
+            self.summary_table.setItem(r, 0, label_item)
             for c, strategy in enumerate(result.strategies, start=1):
                 item = QTableWidgetItem(getter(strategy))
                 item.setTextAlignment(
@@ -527,6 +600,7 @@ class ResultsPanel(QTabWidget):
 
     def _show_debt(self, result: SimulationResult):
         draw_debt_chart(self.debt_canvas, result)
+        self.debt_canvas.set_redraw(lambda: draw_debt_chart(self.debt_canvas, result))
         rows = []
         for strategy in result.strategies:
             rows.append(

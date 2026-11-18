@@ -12,6 +12,18 @@ original** y se calcula una sola vez, con una tasa de referencia determinística
 estable aunque la tasa realizada varíe entre caminos, que es como funciona un
 crédito en la práctica. Cualquier saldo remanente al vencimiento —el caso típico
 cuando los intereses se capitalizan— se paga íntegro en el último año.
+
+Moneda
+------
+Un crédito puede estar en USD o en COP. El saldo se lleva **en la moneda del
+crédito** y se convierte al cruzar al portafolio, que vive en USD, con la tasa
+determinística del caso (`PesoAssumptions`): desembolso, intereses y cuotas del
+año `t` a la tasa del inicio del año, ``S_(t−1)`` (igual que los flujos), y el
+saldo —para el LTV y el patrimonio neto— a la de cierre, ``S_t``. Así, con
+devaluación, la deuda en pesos pesa cada vez menos en dólares.
+
+La tasa fija se lee en pesos. En modo spread, la base es la caja USD llevada a
+pesos por paridad, ``(1 + caja)(1 + devaluación) − 1``, más el spread.
 """
 
 from __future__ import annotations
@@ -72,8 +84,11 @@ class LoanTerms:
     amortization: Amortization = Amortization.BULLET
     max_ltv: float | None = None
     target_ltv: float | None = None
+    currency: str = "USD"
 
     def __post_init__(self) -> None:
+        if self.currency not in ("USD", "COP"):
+            raise ValueError(f"{self.name}: moneda desconocida {self.currency!r}.")
         for field_name, enum_cls in (
             ("rate_mode", RateMode),
             ("interest_mode", InterestMode),
@@ -154,19 +169,41 @@ class LoanSimulator:
     reportan. El histórico del saldo lo guarda el motor, que es quien lo usa.
     """
 
-    def __init__(self, terms: LoanTerms, n_paths: int, horizon: int, cash_return: float = 0.0):
+    def __init__(self, terms: LoanTerms, n_paths: int, horizon: int, cash_return: float = 0.0,
+                 peso=None):
         self.terms = terms
         self.horizon = horizon
+        if terms.currency == "COP":
+            if peso is None:
+                raise ValueError(
+                    f"{terms.name}: el crédito está en COP y el caso no tiene tasa USD/COP."
+                )
+            cash_return = local_cash_rate(cash_return, peso)
+        self.peso = peso if terms.currency == "COP" else None
         self.fractions = terms.amortization_fractions(cash_return)
         self.balance = np.zeros(n_paths, dtype=float)
         self.margin_calls = np.zeros(n_paths, dtype=int)
         self.forced_sales = np.zeros(n_paths, dtype=float)
 
+    def fx_open(self, year: int) -> float:
+        """Unidades de la moneda del crédito por USD al inicio del año (1 en USD)."""
+        return 1.0 if self.peso is None else self.peso.rate(year - 1)
+
+    def fx_close(self, year: int) -> float:
+        """Unidades de la moneda del crédito por USD al cierre del año."""
+        return 1.0 if self.peso is None else self.peso.rate(year)
+
+    def balance_usd(self, year: int) -> np.ndarray:
+        """Saldo por camino en USD, a la tasa de cierre del año."""
+        fx = self.fx_close(year)
+        return self.balance if fx == 1.0 else self.balance / fx
+
     def drawdown(self, year: int) -> float:
-        """Monto que ingresa al portafolio este año por desembolso del crédito."""
+        """Monto en USD que ingresa al portafolio este año por desembolso."""
         if year == self.terms.start_year:
             self.balance += self.terms.principal
-            return self.terms.principal
+            fx = self.fx_open(year)
+            return self.terms.principal if fx == 1.0 else self.terms.principal / fx
         return 0.0
 
     def accrue_and_amortize(self, year: int, path_rates: np.ndarray) -> np.ndarray:
@@ -200,17 +237,33 @@ class LoanSimulator:
             principal = np.minimum(self.balance, scheduled)
         self.balance -= principal
         outflow += principal
-        return outflow
+        fx = self.fx_open(year)
+        return outflow if fx == 1.0 else outflow / fx
 
-    def margin_call(self, assets: np.ndarray) -> np.ndarray:
+    def margin_call(self, assets: np.ndarray, year: int | None = None) -> np.ndarray:
         """Liquidación forzada si se supera el LTV máximo.
 
         Vender activos para pagar deuda reduce ambos lados por igual, así que el
         monto `d` que devuelve el LTV al objetivo `t` sale de
         `(D - d) / (A - d) = t`, es decir `d = (D - t·A) / (1 - t)`.
 
-        Devuelve el monto liquidado por camino, que ya fue restado del saldo.
+        Devuelve el monto liquidado por camino **en USD**, que ya fue restado
+        del saldo. `assets` está en USD; para un crédito en COP el saldo se
+        compara a la tasa de cierre de `year`.
         """
+        fx = 1.0 if year is None else self.fx_close(year)
+        if fx != 1.0:
+            # Se trabaja en USD y lo vendido se descuenta del saldo en pesos.
+            local = self.balance
+            self.balance = local / fx
+            try:
+                sale = self._margin_call_usd(assets)
+            finally:
+                self.balance = self.balance * fx
+            return sale
+        return self._margin_call_usd(assets)
+
+    def _margin_call_usd(self, assets: np.ndarray) -> np.ndarray:
         target = self.terms.effective_target_ltv
         if target is None or not self.terms.active:
             return np.zeros(len(self.balance), dtype=float)
@@ -234,3 +287,8 @@ class LoanSimulator:
         # pasó nada.
         self.margin_calls += (sale > 0).astype(int)
         return sale
+
+
+def local_cash_rate(usd_cash: np.ndarray | float, peso) -> np.ndarray | float:
+    """La caja USD llevada a pesos por paridad: (1 + caja)(1 + devaluación) − 1."""
+    return (1.0 + usd_cash) * (1.0 + peso.devaluation) - 1.0

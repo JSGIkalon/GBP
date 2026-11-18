@@ -168,9 +168,9 @@ def solve(
         _set(trial, variable, value)
         result = simulate_strategy(
             trial, scenario.horizon, scenario.inflation, scenario.initial_value, cmas, market,
-            peso=scenario.peso,
+            peso=scenario.peso, capital_factor=scenario.capital_factor,
         )
-        p = result.success_probability if goal is None else goal_probability(result, goal)
+        p = result.success_probability if goal is None else goal_probability(result, goal, scenario.peso)
         cache[value] = p
         if progress:
             progress(len(cache), f"Probando {len(cache)}…")

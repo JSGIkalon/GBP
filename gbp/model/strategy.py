@@ -42,6 +42,10 @@ class Strategy:
     cashflows: list[CashFlow] = field(default_factory=list)
     loan: LoanTerms | None = None
     initial_value: float | None = None
+    # Si los pesos vienen de aplicar una optimización, cuál («Maximizar
+    # eficiencia»…). Es solo una marca de lectura: se borra en cuanto alguien
+    # edita los pesos a mano, porque desde ahí ya no son los optimizados.
+    optimization: str | None = None
 
     def __post_init__(self) -> None:
         if self.initial_value is not None and self.initial_value < 0:

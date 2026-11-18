@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...model.currency import BASE_CURRENCY, SUPPORTED_CURRENCIES, describe_rate
 from ...model.scenario import PesoAssumptions, Scenario
 from ..theme import (
     INK,
@@ -67,7 +69,21 @@ class ScenarioPanel(QWidget):
         use_thousands_dot(self.initial_value)
         self.initial_value.setSingleStep(1_000_000)
         self.initial_value.valueChanged.connect(self._on_change)
-        form.addRow("Capital inicial", self.initial_value)
+        # Moneda en que se escribe el capital. El motor siempre proyecta en la
+        # moneda base (USD): un capital en COP se convierte con la tasa inicial.
+        self.initial_currency = QComboBox()
+        for code in SUPPORTED_CURRENCIES:
+            self.initial_currency.addItem(code, code)
+        self.initial_currency.setToolTip(
+            "Moneda en que escribes el capital inicial. Los cálculos se hacen en "
+            f"{BASE_CURRENCY}: un capital en COP se convierte con la tasa USD/COP inicial."
+        )
+        self.initial_currency.currentIndexChanged.connect(self._on_change)
+        capital_row = QHBoxLayout()
+        capital_row.setSpacing(6)
+        capital_row.addWidget(self.initial_value, 1)
+        capital_row.addWidget(self.initial_currency)
+        form.addRow("Capital inicial", capital_row)
 
         # El campo está en unidades, no en millones, y eso no se ve: escribir
         # "40" queriendo decir 40 millones deja un caso de cuarenta dólares que
@@ -95,9 +111,11 @@ class ScenarioPanel(QWidget):
 
         note = QLabel(
             "La inflación indexa los flujos marcados como tales y permite ver los "
-            "resultados en poder adquisitivo de hoy. Los montos del caso se ingresan en "
-            "USD, salvo los flujos y activos marcados en COP; la vista en COP se activa "
-            "en Ajustes."
+            "resultados en poder adquisitivo de hoy. Moneda base de los cálculos: "
+            f"{BASE_CURRENCY}. El capital se escribe en la moneda elegida a su lado; "
+            "metas, crédito, flujos y activos propios, cada uno en la suya (USD por "
+            "defecto). Todo lo que está en COP se convierte a USD antes de simular u "
+            "optimizar. La vista en COP se activa en Ajustes."
         )
         note.setWordWrap(True)
         note.setStyleSheet(NOTE_STYLE)
@@ -151,6 +169,11 @@ class ScenarioPanel(QWidget):
         peso_note.setWordWrap(True)
         peso_note.setStyleSheet(NOTE_STYLE)
         layout.addWidget(peso_note)
+        # La tasa en uso, siempre a la vista.
+        self.rate_label = QLabel("")
+        self.rate_label.setWordWrap(True)
+        self.rate_label.setStyleSheet(NOTE_STYLE)
+        layout.addWidget(self.rate_label)
 
         layout.addSpacing(8)
         self.goals_panel = GoalsPanel(scenario.goals)
@@ -188,6 +211,9 @@ class ScenarioPanel(QWidget):
         self._loading = True
         self.name_edit.setText(scenario.name)
         self.initial_value.setValue(scenario.initial_value)
+        self.initial_currency.setCurrentIndex(
+            max(self.initial_currency.findData(scenario.initial_currency), 0)
+        )
         self.horizon.setValue(scenario.horizon)
         self.inflation.setValue(scenario.inflation * 100.0)
         peso = scenario.peso
@@ -198,6 +224,7 @@ class ScenarioPanel(QWidget):
         )
         self._update_peso_enabled()
         self.goals_panel.reload(scenario.goals)
+        self.goals_panel.set_horizon(scenario.horizon)
         self._loading = False
         self._update_initial_hint()
 
@@ -209,6 +236,27 @@ class ScenarioPanel(QWidget):
         avisa, no se impide: el semáforo dice lo que pasa y deja decidir.
         """
         value = self.initial_value.value()
+        currency = self.initial_currency.currentData() or BASE_CURRENCY
+        if currency != BASE_CURRENCY and value > 0:
+            # La conversión se ve mientras se escribe: qué tasa se usa y en
+            # cuánto queda en la moneda base. Sin tasa, se dice qué falta.
+            peso = self.scenario.peso
+            if peso is None:
+                self.initial_hint.setText(
+                    status_dot(
+                        STATUS_WARNING,
+                        f"<b>{format_number(value)} {currency}</b>: falta la tasa USD/COP "
+                        "(sección «Pesos colombianos», abajo). Sin ella no se puede "
+                        "simular ni optimizar.",
+                    )
+                )
+            else:
+                self.initial_hint.setText(
+                    f"<span style='color:{INK_SOFT};'>= {format_money(value)} {currency} "
+                    f"→ {format_money(value / peso.spot)} {BASE_CURRENCY} a "
+                    f"{format_number(peso.spot)} COP por USD</span>"
+                )
+            return
         if value <= 0:
             self.initial_hint.setText(
                 f"<span style='color:{INK_SOFT};'>Sin capital inicial. La estrategia "
@@ -233,7 +281,9 @@ class ScenarioPanel(QWidget):
             return
         self.scenario.name = self.name_edit.text().strip() or "Caso sin título"
         self.scenario.initial_value = self.initial_value.value()
+        self.scenario.initial_currency = self.initial_currency.currentData() or BASE_CURRENCY
         self.scenario.horizon = self.horizon.value()
+        self.goals_panel.set_horizon(self.scenario.horizon)
         self.scenario.inflation = self.inflation.value() / 100.0
         spot = self.fx_spot.value()
         if spot > 0:
@@ -250,6 +300,7 @@ class ScenarioPanel(QWidget):
         self.changed.emit()
 
     def _update_peso_enabled(self):
+        self.rate_label.setText("Tasa en uso: " + describe_rate(self.scenario.peso))
         has_rate = self.fx_spot.value() > 0
         self.devaluation.setEnabled(has_rate)
         self.cop_inflation.setEnabled(has_rate)

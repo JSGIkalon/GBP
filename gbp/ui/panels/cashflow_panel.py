@@ -322,6 +322,15 @@ class CashflowPanel(QWidget):
         )
         if any(f.currency == "COP" for f in self.flows):
             texto += " (los flujos en COP, convertidos con la tasa de cada año)"
+        horizon = self.scenario.horizon
+        fuera = [f.name for f in self.flows if f.start_year > horizon]
+        cortados = [f.name for f in self.flows
+                    if f.start_year <= horizon < f.end_year < 10_000]
+        if fuera:
+            texto += (f". Empiezan después del horizonte de {horizon} años y no se "
+                      "aplican: " + ", ".join(fuera))
+        if cortados:
+            texto += (f". Se cortan en el año {horizon}: " + ", ".join(cortados))
 
         # Los flujos porcentuales no tienen monto fuera de la simulación, así que
         # no se pueden sumar al total. Decirlo aparte es más honesto que dejar

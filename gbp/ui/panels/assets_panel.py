@@ -276,6 +276,7 @@ class AssetsPanel(QWidget):
         asset.yield_ = actualizado.yield_
         asset.asset_class = actualizado.asset_class
         asset.correlation_source = actualizado.correlation_source
+        asset.currency = actualizado.currency
         asset.notes = actualizado.notes
 
         self.reload(self.cmas)

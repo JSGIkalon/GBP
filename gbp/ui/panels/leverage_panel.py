@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QSpinBox,
@@ -63,7 +64,20 @@ class LeveragePanel(QWidget):
         use_thousands_dot(self.principal)
         self.principal.setSingleStep(1_000_000)
         self.principal.valueChanged.connect(self._on_change)
-        form.addRow("Monto del crédito", self.principal)
+        # Moneda del crédito: en COP el saldo se lleva en pesos y se convierte
+        # a USD con la tasa del caso; la deuda pesa menos con la devaluación.
+        self.currency = QComboBox()
+        self.currency.addItems(["USD", "COP"])
+        self.currency.setToolTip(
+            "COP: monto, tasa fija y cuotas en pesos. Se convierten a USD con la tasa "
+            "y la devaluación de «Pesos colombianos» de Escenario. En modo spread, la "
+            "base es la caja USD llevada a pesos por paridad."
+        )
+        self.currency.currentIndexChanged.connect(self._on_change)
+        principal_row = QHBoxLayout()
+        principal_row.addWidget(self.principal, 1)
+        principal_row.addWidget(self.currency)
+        form.addRow("Monto del crédito", principal_row)
 
         self.start_year = QSpinBox()
         self.start_year.setRange(1, 100)
@@ -162,6 +176,7 @@ class LeveragePanel(QWidget):
         loan = loan or LoanTerms()
         self.name.setText(loan.name)
         self.principal.setValue(loan.principal)
+        self.currency.setCurrentText(loan.currency)
         self.start_year.setValue(loan.start_year)
         self.term_years.setValue(loan.term_years)
         self.rate_mode.setCurrentText(loan.rate_mode.value)
@@ -227,6 +242,7 @@ class LeveragePanel(QWidget):
                 amortization=Amortization(self.amortization.currentText()),
                 max_ltv=max_ltv,
                 target_ltv=target_ltv,
+                currency=self.currency.currentText(),
             )
         except ValueError:
             return

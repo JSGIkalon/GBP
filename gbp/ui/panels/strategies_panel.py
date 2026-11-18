@@ -265,7 +265,17 @@ class StrategiesPanel(QWidget):
         marks.append(
             "capital propio" if strategy.has_own_initial else "capital del escenario"
         )
+        if strategy.optimization:
+            marks.append(f"pesos optimizados ({strategy.optimization.lower()})")
         self.badges.setText(" · ".join(marks))
+
+    def _weights_edited(self):
+        """Los pesos cambiaron a mano: ya no son los de una optimización."""
+        strategy = self.current
+        if strategy is not None and strategy.optimization:
+            strategy.optimization = None
+            self._update_badges(strategy)
+        self.changed.emit()
 
     def _render_current(self):
         strategy = self.current
@@ -347,7 +357,7 @@ class StrategiesPanel(QWidget):
             (new_name if k == old_name else k): v for k, v in strategy.weights.items()
         }
         self._render_weights(strategy)
-        self.changed.emit()
+        self._weights_edited()
 
     def _render_grouped(self, strategy: Strategy | None):
         grouped = (
@@ -411,7 +421,7 @@ class StrategiesPanel(QWidget):
             return
         strategy.allocation.weights[name] = value
         self._update_total()
-        self.changed.emit()
+        self._weights_edited()
 
     # ------------------------------------------------------------------
     def _unique_name(self, base: str) -> str:
@@ -548,7 +558,7 @@ class StrategiesPanel(QWidget):
         strategy.allocation.weights[libres[0]] = 0.0
         self._render_weights(strategy)
         self.weights_table.setCurrentCell(self.weights_table.rowCount() - 1, 1)
-        self.changed.emit()
+        self._weights_edited()
 
     def _remove_asset_row(self):
         strategy = self.current
@@ -560,7 +570,7 @@ class StrategiesPanel(QWidget):
             return
         strategy.allocation.weights.pop(name, None)
         self._render_weights(strategy)
-        self.changed.emit()
+        self._weights_edited()
 
     def _normalize(self):
         strategy = self.current
@@ -570,4 +580,4 @@ class StrategiesPanel(QWidget):
         for name in strategy.allocation.weights:
             strategy.allocation.weights[name] /= total
         self._render_weights(strategy)
-        self.changed.emit()
+        self._weights_edited()

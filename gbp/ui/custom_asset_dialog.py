@@ -36,13 +36,19 @@ from .theme import INK_SOFT, NAVY, STATUS_WARNING, status_dot
 # Son las tres que un analista reconoce de un vistazo.
 PREVIEW_AGAINST = ("U.S. Aggregate Bonds", "U.S. Large Cap", "U.S. Cash")
 
-CURRENCY_WARNING = (
-    "Los tres valores van <b>en dólares</b>. Si el activo es en otra moneda, "
-    "descuenta tú la devaluación esperada antes de escribirlos y súmale la "
-    "volatilidad del tipo de cambio. La app no convierte monedas: un 10% en "
-    "pesos con el peso devaluándose 4% al año es un 5.8% en dólares, y su "
-    "volatilidad en dólares la domina el tipo de cambio, no el activo."
-)
+def currency_note(code: str) -> str:
+    """Aviso según la moneda elegida en el diálogo."""
+    if code == "COP":
+        return (
+            "Retorno y volatilidad <b>en pesos (COP)</b>. La app los convierte a "
+            "dólares con la devaluación del caso: escríbelos tal cual, sin "
+            "descontarla. El tipo de cambio sigue un camino fijo, así que no se "
+            "agrega riesgo cambiario."
+        )
+    return (
+        "Retorno, volatilidad y yield <b>en dólares (USD)</b>. Si el activo es en "
+        "pesos, elige COP y la app hace la conversión."
+    )
 
 
 class CustomAssetDialog(QDialog):
@@ -120,7 +126,8 @@ class CustomAssetDialog(QDialog):
 
         layout.addLayout(correlation_box)
 
-        warning = QLabel(CURRENCY_WARNING)
+        warning = QLabel(currency_note(asset.currency if asset else "USD"))
+        self._currency_warning = warning
         warning.setWordWrap(True)
         warning.setStyleSheet(f"color: {NAVY};")
         layout.addWidget(warning)
@@ -137,6 +144,9 @@ class CustomAssetDialog(QDialog):
             "COP: el retorno y la volatilidad se escriben en pesos. El motor los lleva a "
             "dólares con la devaluación de la sección «Pesos colombianos» del caso: "
             "rinde (1 + retorno en pesos) / (1 + devaluación) − 1."
+        )
+        self.currency.currentTextChanged.connect(
+            lambda code: self._currency_warning.setText(currency_note(code))
         )
         numbers.addRow("Moneda", self.currency)
 

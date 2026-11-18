@@ -102,7 +102,9 @@ class CapitalPanel(QWidget):
         aunque después se cambiara en la pestaña Escenario.
         """
         self.inherited.setText(
-            f"Capital del escenario: {format_money(self.scenario.initial_value)}"
+            f"Capital del escenario: {format_money(self.scenario.initial_value)} "
+            f"{self.scenario.initial_currency}. El capital propio se escribe en la "
+            "misma moneda."
         )
         if self.strategy is not None and self.strategy.initial_value is None:
             self._loading = True

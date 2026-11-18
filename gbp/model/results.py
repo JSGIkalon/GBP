@@ -347,6 +347,26 @@ class SimulationResult:
             fx_real_path=close * usd_factors / deflator,
         )
 
+    def subset(self, names: list[str]) -> "SimulationResult":
+        """La misma corrida con solo las estrategias de `names`, en su orden original.
+
+        Es un filtro de lectura: no copia los caminos ni recalcula nada, así que
+        cada estrategia conserva exactamente sus cifras —incluida su probabilidad
+        de éxito—. Ninguna estrategia se combina con otra.
+        """
+        wanted = set(names)
+        return SimulationResult(
+            strategies=[s for s in self.strategies if s.name in wanted],
+            horizon=self.horizon,
+            n_paths=self.n_paths,
+            seed=self.seed,
+            scenario_name=self.scenario_name,
+            currency=self.currency,
+            fx_rate=self.fx_rate,
+            fx_path=self.fx_path,
+            fx_real_path=self.fx_real_path,
+        )
+
     def money_factor(self, year: int, real: bool) -> float:
         """Por cuánto se multiplica un monto USD del año `year` para esta vista.
 

@@ -18,22 +18,24 @@ en el medio se quedó sin plata.
 
 El monto puede estar en moneda de hoy (`real=True`, lo normal: «lo que hoy
 compran 10.000.000») o en valores nominales.
+
+Moneda
+------
+Una meta puede escribirse en USD o en COP. El patrimonio se simula en USD, así
+que una meta en pesos se convierte a un umbral en dólares con la tasa
+determinística del caso (`PesoAssumptions`):
+
+* nominal: ``monto / S_t``;
+* de hoy:  ``monto · (1 + π_COP)^t / S_t`` en USD nominales. Con la inflación
+  colombiana de paridad esto es lo mismo que una meta de hoy de
+  ``monto / spot`` dólares.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
+from dataclasses import dataclass, field
 
 import numpy as np
-
-
-class GoalPriority(str, Enum):
-    """Solo una etiqueta para ordenar la lectura; no pesa en ningún cálculo."""
-
-    ESSENTIAL = "esencial"
-    IMPORTANT = "importante"
-    ASPIRATIONAL = "deseable"
 
 
 @dataclass
@@ -48,11 +50,11 @@ class Goal:
     amount: float
     year: int | None = None
     real: bool = True
-    priority: GoalPriority = GoalPriority.IMPORTANT
+    currency: str = field(default="USD", kw_only=True)
 
     def __post_init__(self) -> None:
-        if isinstance(self.priority, str):
-            self.priority = GoalPriority(self.priority)
+        if self.currency not in ("USD", "COP"):
+            raise ValueError(f"{self.name}: moneda desconocida {self.currency!r}.")
         if self.amount < 0:
             raise ValueError(f"{self.name}: el monto de la meta no puede ser negativo.")
         if self.year is not None and self.year < 1:
@@ -70,7 +72,33 @@ class Goal:
         return f"{self.name} ({cuando})"
 
 
-def goal_probability(strategy_result, goal: Goal) -> float:
+def _cop_threshold(goal: Goal, year: int, peso, usd_factor: float | None):
+    """Umbral de la meta en COP llevado a USD: (monto, ¿es real en USD?)."""
+    if peso is None:
+        raise ValueError(
+            f"{goal.name}: la meta está en COP y el caso no tiene tasa USD/COP."
+        )
+    if not goal.real:
+        return goal.amount / peso.rate(year), False
+    if peso.inflation is None:
+        # Paridad: la inflación COP es la USD con la devaluación, así que la
+        # meta de hoy en pesos es una meta de hoy en dólares a la tasa inicial.
+        return goal.amount / peso.spot, True
+    nominal = goal.amount * (1.0 + peso.inflation) ** year / peso.rate(year)
+    return nominal, False
+
+
+def goal_amount_usd(goal: Goal, horizon: int, peso=None) -> tuple[float, bool]:
+    """El monto de la meta en USD y si es de hoy (real) o nominal.
+
+    Una meta en USD vuelve tal cual. Sirve para mostrarla junto al patrimonio.
+    """
+    if goal.currency != "COP":
+        return goal.amount, goal.real
+    return _cop_threshold(goal, goal.resolved_year(horizon), peso, None)
+
+
+def goal_probability(strategy_result, goal: Goal, peso=None) -> float:
     """Fracción de caminos en que la meta se cumple.
 
     Devuelve `nan` si el año de la meta cae fuera del horizonte simulado: no
@@ -82,9 +110,12 @@ def goal_probability(strategy_result, goal: Goal) -> float:
     year = goal.resolved_year(horizon)
     wealth = strategy_result.wealth[:, :year]
     at_year = wealth[:, year - 1]
-    if goal.real and strategy_result.inflation_factors.size:
+    amount, real = goal.amount, goal.real
+    if goal.currency == "COP":
+        amount, real = _cop_threshold(goal, year, peso, None)
+    if real and strategy_result.inflation_factors.size:
         at_year = at_year / strategy_result.inflation_factors[year - 1]
     # Sin agotarse **antes** del año de la meta: el propio año lo decide el
     # monto, que para una meta positiva ya exige patrimonio positivo.
     alive_before = (wealth[:, : year - 1] > 0).all(axis=1) if year > 1 else True
-    return float(np.mean((at_year >= goal.amount) & alive_before))
+    return float(np.mean((at_year >= amount) & alive_before))

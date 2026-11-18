@@ -54,7 +54,7 @@ import numpy as np
 from ..model.assets import CMASet
 from ..model.cashflows import CashFlow, FlowKind, combined_rate_schedule
 from ..model.correlation import CorrelationMatrix, cholesky_factor, covariance
-from ..model.leverage import LoanSimulator, RateMode
+from ..model.leverage import LoanSimulator, RateMode, local_cash_rate
 from ..model.results import SimulationResult, StrategyResult
 from ..model.scenario import Scenario, SimulationSettings
 from ..model.strategy import Strategy
@@ -203,11 +203,14 @@ def simulate_strategy(
     market: Market,
     on_year: Callable[[], None] | None = None,
     peso=None,
+    capital_factor: float = 1.0,
 ) -> StrategyResult:
     """Proyecta una estrategia sobre caminos de mercado ya sorteados.
 
     `cmas` tiene que ser la librería **ya llevada a USD** (`CMASet.in_usd`), la
-    misma con la que se sorteó `market`; `peso` convierte los flujos en COP.
+    misma con la que se sorteó `market`; `peso` convierte los flujos en COP y
+    `capital_factor` lleva el capital escrito a USD (`Scenario.capital_factor`;
+    1.0 si el capital ya está en USD, que deja las cifras idénticas bit a bit).
 
     Pública porque el solver la llama muchas veces sobre el mismo `market`,
     cambiando solo una cifra de la estrategia.
@@ -250,12 +253,15 @@ def simulate_strategy(
 
     loan = strategy.loan
     ledger = (
-        LoanSimulator(loan, n_paths, horizon, risk_free_rate(cmas, market.cash_asset))
+        LoanSimulator(loan, n_paths, horizon, risk_free_rate(cmas, market.cash_asset),
+                      peso=peso)
         if loan is not None and loan.active
         else None
     )
 
     initial_value = float(strategy.resolved_initial(scenario_initial))
+    if capital_factor != 1.0:
+        initial_value *= capital_factor
     assets = np.full(n_paths, initial_value)
     assets_history = np.zeros((horizon, n_paths))
     debt_history = np.zeros((horizon, n_paths)) if ledger is not None else None
@@ -275,11 +281,11 @@ def simulate_strategy(
         assets = assets * growth
 
         if ledger is not None:
-            rates = _loan_rates(loan, cash_rate, y, n_paths)
+            rates = _loan_rates(loan, cash_rate, y, n_paths, ledger.peso)
             assets -= ledger.accrue_and_amortize(year, rates)
 
         if flow_rates[y] or rate_in[y] or rate_out[y]:
-            net_wealth = assets - ledger.balance if ledger is not None else assets
+            net_wealth = assets - ledger.balance_usd(year) if ledger is not None else assets
             base = np.maximum(net_wealth, 0.0)
             assets += base * flow_rates[y]
             contributions[y] += base * rate_in[y]
@@ -296,8 +302,8 @@ def simulate_strategy(
             # intactos: el patrimonio neto subía al recibir una llamada a margen
             # —imposible— y los años siguientes capitalizaban sobre un
             # portafolio que ya se había vendido.
-            assets -= ledger.margin_call(np.maximum(assets, 0.0))
-            debt_history[y] = ledger.balance
+            assets -= ledger.margin_call(np.maximum(assets, 0.0), year)
+            debt_history[y] = ledger.balance_usd(year)
 
         assets_history[y] = assets
 
@@ -341,13 +347,15 @@ def _year_cash(cash_rate: np.ndarray | float, year_index: int) -> np.ndarray | f
     return cash_rate
 
 
-def _loan_rates(loan, cash_rate: np.ndarray | float, year_index: int, n_paths: int) -> np.ndarray:
-    """Tasa del crédito para el año, por camino."""
+def _loan_rates(loan, cash_rate: np.ndarray | float, year_index: int, n_paths: int,
+                peso=None) -> np.ndarray:
+    """Tasa del crédito para el año, por camino, en la moneda del crédito."""
     if loan.rate_mode is RateMode.FIXED:
         return np.full(n_paths, loan.rate)
-    return np.broadcast_to(
-        np.asarray(_year_cash(cash_rate, year_index)) + loan.spread, (n_paths,)
-    ).copy()
+    cash = np.asarray(_year_cash(cash_rate, year_index))
+    if peso is not None:
+        cash = local_cash_rate(cash, peso)
+    return np.broadcast_to(cash + loan.spread, (n_paths,)).copy()
 
 
 def simulate(
@@ -403,6 +411,7 @@ def simulate(
                 market,
                 on_year=tick if progress else None,
                 peso=scenario.peso,
+                capital_factor=scenario.capital_factor,
             )
         )
 
@@ -416,3 +425,23 @@ def simulate(
         seed=settings.seed,
         scenario_name=scenario.name,
     )
+
+
+# Umbrales de memoria para la interfaz: por encima del primero se pide
+# confirmación; por encima del segundo no se corre. La simulación no cambia.
+MEMORY_WARN_BYTES = 2 * 1024**3
+MEMORY_BLOCK_BYTES = 8 * 1024**3
+
+
+def estimate_memory_bytes(n_paths: int, n_assets: int, horizon: int, n_strategies: int = 1) -> int:
+    """Memoria aproximada de una corrida, en bytes (float64).
+
+    El mercado vive como sorteos, retornos correlacionados y retornos brutos
+    (`n_paths × horizon × n_assets` cada uno). Cada estrategia guarda unas
+    cuatro matrices `horizon × n_paths` (activos, deuda, patrimonio y sus
+    resúmenes). Es una cota gruesa, pensada para avisar antes de agotar la RAM.
+    """
+    cell = 8
+    market = 3 * n_paths * horizon * max(n_assets, 1) * cell
+    per_strategy = 4 * n_paths * horizon * cell
+    return int(market + per_strategy * max(n_strategies, 1))

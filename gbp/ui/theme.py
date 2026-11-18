@@ -380,6 +380,46 @@ QLabel#kpiUnit {{
     color: {INK_SOFT};
     font-size: 11px;
 }}
+QToolButton#helpButton {{
+    background-color: {WHITE};
+    color: {PRIMARY};
+    border: 1px solid {PRIMARY};
+    border-radius: 9px;
+    min-width: 16px;
+    max-width: 16px;
+    min-height: 16px;
+    max-height: 16px;
+    padding: 0px;
+    font-size: 11px;
+    font-weight: 700;
+}}
+QToolButton#helpButton:hover {{
+    background-color: {PRIMARY};
+    color: {WHITE};
+}}
+/* Filtro de estrategias sobre los resultados: botones que se marcan. */
+QToolButton#strategyChip {{
+    background-color: {WHITE};
+    color: {INK};
+    border: 1px solid #D0D9E2;
+    border-radius: 12px;
+    padding: 3px 12px;
+}}
+QToolButton#strategyChip:checked {{
+    background-color: {PRIMARY};
+    color: {WHITE};
+    border: 1px solid {PRIMARY};
+}}
+QToolButton#strategyChip:hover {{
+    border: 1px solid {PRIMARY};
+}}
+QLabel#optimizedBanner {{
+    background-color: #EAF6F2;
+    color: {NAVY};
+    border: 1px solid #CDE9DF;
+    border-radius: 4px;
+    padding: 6px 12px;
+}}
 
 /* --- Pestañas ----------------------------------------------------------- */
 QTabWidget::pane {{
@@ -507,21 +547,45 @@ QTableCornerButton::section {{
 }}
 
 /* --- Campos ------------------------------------------------------------- */
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QDateEdit, QPlainTextEdit, QTextEdit {{
     background-color: {WHITE};
     border: 1px solid #D5DDE5;
     border-radius: 4px;
     padding: 5px 8px;
+    min-height: 20px;
+    color: {INK};
+    /* Texto seleccionado legible: sin esto Qt usaba el resaltado del sistema,
+       que con algunos temas de Windows dejaba el texto casi invisible. */
+    selection-background-color: {PRIMARY};
+    selection-color: {WHITE};
+    placeholder-text-color: {INK_SOFT};
+}}
+/* Editor dentro de una celda de tabla: la fila mide 28 px, y con el padding y
+   el alto mínimo de los campos normales el texto quedaba recortado por arriba
+   y por abajo mientras se escribía. Aquí el editor ocupa la celda sin margen. */
+QTableView QLineEdit, QTableView QSpinBox, QTableView QDoubleSpinBox,
+QTableView QComboBox, QTableWidget QLineEdit, QTableWidget QSpinBox,
+QTableWidget QDoubleSpinBox, QTableWidget QComboBox {{
+    padding: 0px 6px;
+    min-height: 0px;
+    margin: 0px;
+    border: 1px solid {PRIMARY};
+    border-radius: 0px;
+    background-color: {WHITE};
     color: {INK};
 }}
-QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {{
+QTableWidget::indicator, QTableView::indicator {{
+    width: 14px;
+    height: 14px;
+}}
+QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover, QDateEdit:hover {{
     border: 1px solid {LEADER};
 }}
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QDateEdit:focus {{
     border: 1px solid {PRIMARY};
 }}
-QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {{
-    color: {LEADER};
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled, QDateEdit:disabled {{
+    color: {INK_SOFT};  /* legible aunque esté apagado */
     background-color: {BG};
 }}
 QComboBox::drop-down {{
