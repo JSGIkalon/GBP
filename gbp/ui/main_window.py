@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QTabWidget,
     QToolButton,
@@ -39,7 +40,7 @@ from ..model.correlation import CorrelationMatrix
 from ..model.custom_assets import custom_pairs, extend_correlations, resolver_for
 from .brand import app_icon, wordmark_pixmap
 from .kpi_cards import KpiRow
-from .sidebar import Sidebar
+from .sidebar import Sidebar, section_of
 from .custom_asset_dialog import merge_custom_assets
 from .export_dialog import ExportDialog
 from .panels.assets_panel import AssetsPanel
@@ -176,6 +177,16 @@ class MainWindow(QMainWindow):
              self.correlation_panel, self.settings_panel),
             sections,
         ):
+            if panel is self.scenario_panel:
+                # Escenario es un formulario largo (pesos, metas, acciones): sin
+                # desplazamiento, Qt lo comprimía y la tabla de metas quedaba
+                # debajo de sus botones.
+                scroll = QScrollArea()
+                scroll.setWidgetResizable(True)
+                scroll.setFrameShape(QFrame.Shape.NoFrame)
+                scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                scroll.setWidget(panel)
+                panel = scroll
             self.inputs.addTab(panel, name)
         self.inputs.setTabToolTip(2, "Supuestos de mercado (CMAs): retorno, volatilidad y yield")
         self.inputs.setTabToolTip(4, "Configuración general de la aplicación")
@@ -188,10 +199,14 @@ class MainWindow(QMainWindow):
         self.settings_panel.view_changed.connect(self._apply_result_view)
 
         # --- Barra lateral: otra puerta a las mismas pestañas -------------
-        self.sidebar = Sidebar(sections)
+        # La barra lateral es la única navegación: las pestañas siguen ahí
+        # (los paneles y las pruebas las usan) pero sin barra visible.
+        self.inputs.tabBar().hide()
+        self.sidebar = Sidebar()
         self.sidebar.section_selected.connect(self._go_to_section)
         self.sidebar.about_requested.connect(self.show_about)
         self.inputs.currentChanged.connect(self.sidebar.set_current)
+        self.inputs.currentChanged.connect(self._update_params_title)
         self.sidebar.set_current(0)
         outer.addWidget(self.sidebar)
 
@@ -214,9 +229,15 @@ class MainWindow(QMainWindow):
         params_layout.setContentsMargins(16, 14, 16, 12)
         params_layout.setSpacing(8)
         header = QHBoxLayout()
-        title = QLabel("Parámetros")
-        title.setObjectName("cardTitle")
-        header.addWidget(title)
+        self.params_section = QLabel("")
+        self.params_section.setObjectName("cardEyebrow")
+        self.params_title = QLabel("")
+        self.params_title.setObjectName("cardTitle")
+        titles = QVBoxLayout()
+        titles.setSpacing(0)
+        titles.addWidget(self.params_section)
+        titles.addWidget(self.params_title)
+        header.addLayout(titles)
         header.addStretch(1)
         collapse = QToolButton()
         collapse.setObjectName("collapseButton")
@@ -227,6 +248,7 @@ class MainWindow(QMainWindow):
         header.addWidget(collapse)
         params_layout.addLayout(header)
         params_layout.addWidget(self.inputs, 1)
+        self._update_params_title(0)
         self.splitter.addWidget(self.params_card)
 
         # --- Resultados -------------------------------------------------
@@ -341,6 +363,11 @@ class MainWindow(QMainWindow):
         """Contrae o muestra el panel de parámetros para dar aire a los resultados."""
         self.params_card.setVisible(visible)
         self.expand_button.setVisible(not visible)
+
+    def _update_params_title(self, index: int):
+        section, name = section_of(index)
+        self.params_section.setText(section.upper())
+        self.params_title.setText(name)
 
     def _go_to_section(self, index: int):
         self.set_params_visible(True)

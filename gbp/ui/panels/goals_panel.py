@@ -69,7 +69,8 @@ class GoalsPanel(QWidget):
         # quedaba cortado en «esencia…».
         header.setSectionResizeMode(COL_PRIORITY, QHeaderView.ResizeMode.Fixed)
         self.table.setColumnWidth(COL_PRIORITY, 120)
-        self.table.setMaximumHeight(170)
+        self.table.setMinimumHeight(120)
+        self.table.setMaximumHeight(200)
         self.table.itemChanged.connect(self._on_item_changed)
         layout.addWidget(self.table)
 

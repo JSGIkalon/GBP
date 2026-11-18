@@ -110,7 +110,8 @@ class AssetsPanel(QWidget):
         self.table.itemSelectionChanged.connect(self._update_buttons)
         self.table.doubleClicked.connect(self._edit_asset)
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        # El nombre completo de la clase, no «U.S.…»; la tabla se desplaza.
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         for i in range(1, len(COLUMNS)):
             header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.table, 1)

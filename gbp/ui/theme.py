@@ -348,6 +348,12 @@ QLabel#cardTitle {{
     font-weight: 600;
     background-color: transparent;
 }}
+QLabel#cardEyebrow {{
+    color: {INK_SOFT};
+    font-size: 10px;
+    font-weight: 600;
+    background-color: transparent;
+}}
 QFrame#kpiCard {{
     background-color: {WHITE};
     border: 1px solid {BORDER};

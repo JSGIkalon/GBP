@@ -253,3 +253,45 @@ def allocation_table_rows(scenario, resolver=None) -> list[dict]:
                 }
             )
     return rows
+
+
+def allocation_comparison(scenario, resolver=None) -> tuple[list[str], list[dict]]:
+    """Los mismos pesos, con las estrategias **en columnas** para compararlas.
+
+    Una fila por sub-clase, agrupadas por clase de activo con una fila de
+    subtotal por clase (`"total": True`). Los pesos son los mismos de
+    `allocation_table_rows`: normalizados sobre el total de cada estrategia.
+    Una sub-clase que una estrategia no usa queda en `None`.
+    """
+    clasificar = resolver.group_of if resolver is not None else group_of
+    names, weights = [], []
+    for strategy in scenario.strategies:
+        total = sum(strategy.weights.values())
+        if total <= 0:
+            continue
+        names.append(strategy.name)
+        weights.append({k: v / total for k, v in strategy.weights.items() if v})
+
+    by_group: dict[str, list[str]] = {}
+    for w in weights:
+        for asset in w:
+            members = by_group.setdefault(clasificar(asset), [])
+            if asset not in members:
+                members.append(asset)
+    order = [g for g in GROUP_ORDER if g in by_group] + [
+        g for g in by_group if g not in GROUP_ORDER
+    ]
+
+    rows = []
+    for grupo in order:
+        assets = sorted(by_group[grupo], key=lambda a: -max(w.get(a, 0.0) for w in weights))
+        rows.append({
+            "group": grupo, "asset": grupo, "total": True,
+            "values": [sum(w.get(a, 0.0) for a in assets) for w in weights],
+        })
+        for asset in assets:
+            rows.append({
+                "group": grupo, "asset": asset, "total": False,
+                "values": [w.get(asset) for w in weights],
+            })
+    return names, rows

@@ -290,7 +290,7 @@ def test_un_activo_propio_aparece_en_su_clase_declarada_en_la_asignacion(window)
     window.results.show_allocation(window.scenario, window.resolver)
 
     clases = {
-        window.results.allocation_table.item(r, 1).text()
+        window.results.allocation_table.item(r, 0).text()
         for r in range(window.results.allocation_table.rowCount())
     }
     assert FIXED_INCOME in clases

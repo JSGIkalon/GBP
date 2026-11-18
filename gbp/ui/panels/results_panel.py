@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -33,19 +33,21 @@ from PySide6.QtWidgets import (
 from ...model.goals import goal_probability
 from ...model.results import SimulationResult
 from ...model.scenario import Scenario, SimulationSettings
-from ..charts.allocation_chart import allocation_table_rows, draw_allocation_chart
+from ..charts.allocation_chart import allocation_comparison, draw_allocation_chart
 from ..charts.box_chart import distribution_table_rows
 from ..charts.canvas import ChartCanvas
 from ..charts.debt_chart import draw_debt_chart
 from ..charts.distribution import BOXES, CHART_KINDS, draw_distribution, normalize_kind
 from ..table_copy import enable_copy
 from ..theme import (
+    INK_SOFT,
     NEGATIVE,
     NOTE_STYLE,
     amount_unit,
     format_display,
 )
 
+TOTAL_ROW_BG = "#EEF3F8"
 EMPTY = "Carga los datos del caso y pulsa «Correr simulación»."
 
 
@@ -192,10 +194,9 @@ class ResultsPanel(QTabWidget):
         a_layout = QVBoxLayout(allocation)
         self.allocation_canvas = ChartCanvas(height=5.2)
         a_layout.addWidget(self.allocation_canvas, 3)
-        self.allocation_columns = [
-            "Estrategia", "Clase de activo", "Sub-clase", "Peso",
-        ]
-        self.allocation_table = _table(self.allocation_columns)
+        # Estrategias en columnas: una fila por sub-clase y un subtotal por
+        # clase, para comparar las estrategias lado a lado.
+        self.allocation_table = _table(["Clase de activo", "Sub-clase"])
         a_layout.addWidget(self.allocation_table, 2)
         allocation_note = QLabel(
             "Los pesos están normalizados sobre el total cargado de cada estrategia. "
@@ -330,11 +331,29 @@ class ResultsPanel(QTabWidget):
         editan al lado y aquí se ve de inmediato en qué queda el reparto.
         """
         draw_allocation_chart(self.allocation_canvas, scenario, resolver)
-        _fill(
-            self.allocation_table,
-            allocation_table_rows(scenario, resolver),
-            self.allocation_columns,
-        )
+        names, rows = allocation_comparison(scenario, resolver)
+        table = self.allocation_table
+        table.setColumnCount(2 + len(names))
+        table.setHorizontalHeaderLabels(["Clase de activo", "Sub-clase", *names])
+        header = table.horizontalHeader()
+        for i in range(table.columnCount()):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+        table.setRowCount(len(rows))
+        bold = QFont(table.font())
+        bold.setWeight(QFont.Weight.DemiBold)
+        for r, row in enumerate(rows):
+            cells = [row["group"], "Total" if row["total"] else row["asset"]]
+            cells += ["—" if v is None else f"{v:.1%}" for v in row["values"]]
+            for c, text in enumerate(cells):
+                item = QTableWidgetItem(text)
+                if c >= 2:
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                if row["total"]:
+                    item.setFont(bold)
+                    item.setBackground(QColor(TOTAL_ROW_BG))
+                elif c == 0 or text == "—":
+                    item.setForeground(QColor(INK_SOFT))
+                table.setItem(r, c, item)
 
     def show_result(self, result: SimulationResult, settings: SimulationSettings, horizon: int):
         self.base_result = result
