@@ -40,7 +40,6 @@ from ..model.correlation import CorrelationMatrix
 from ..model.currency import BASE_CURRENCY, describe_rate
 from ..model.custom_assets import custom_pairs, extend_correlations, resolver_for
 from .brand import app_icon, wordmark_pixmap
-from .clock_window import ClockWindow
 from .kpi_cards import KpiRow
 from .sidebar import Sidebar, section_of
 from .custom_asset_dialog import merge_custom_assets
@@ -115,7 +114,6 @@ class MainWindow(QMainWindow):
         # Último resultado del solver y la firma del caso sobre el que se hizo.
         self._last_solve = None
         self._last_solve_signature = None
-        self._clock_window = None
 
         self._session_timer = QTimer(self)
         self._session_timer.setSingleShot(True)
@@ -506,28 +504,12 @@ class MainWindow(QMainWindow):
         self.export_action.setShortcut("Ctrl+E")
         run_menu.addAction(self.export_action)
 
-        view_menu = self.menuBar().addMenu("&Ver")
-        clock_action = QAction("&Reloj", self)
-        clock_action.setShortcut("Ctrl+Shift+C")
-        clock_action.triggered.connect(self.open_clock)
-        view_menu.addAction(clock_action)
-
         help_menu = self.menuBar().addMenu("A&yuda")
         about_action = QAction("&Acerca de GBP", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
 
     # ------------------------------------------------------------------
-    def open_clock(self):
-        if self._clock_window is None:
-            self._clock_window = ClockWindow(self)
-            self._clock_window.destroyed.connect(
-                lambda *_args: setattr(self, "_clock_window", None)
-            )
-        self._clock_window.show()
-        self._clock_window.raise_()
-        self._clock_window.activateWindow()
-
     def _on_scenario_changed(self):
         self.strategies_panel.capital_panel.refresh_inherited()
         # El total de flujos depende de la inflación y, con flujos en COP, de
