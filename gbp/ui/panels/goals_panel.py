@@ -22,7 +22,11 @@ from PySide6.QtWidgets import (
 )
 
 from ...model.goals import Goal, GoalPriority
-from ..theme import BLUE_MID, INK_SOFT, format_money
+from ..theme import (
+    NOTE_STYLE,
+    SECTION_STYLE,
+    format_money,
+)
 
 COLUMNS = ["Meta", "Monto", "Año", "Moneda de hoy", "Prioridad"]
 COL_NAME, COL_AMOUNT, COL_YEAR, COL_REAL, COL_PRIORITY = range(5)
@@ -40,8 +44,8 @@ class GoalsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        title = QLabel("METAS (OPCIONAL)")
-        title.setStyleSheet(f"color: {BLUE_MID}; font-weight: 600; letter-spacing: 2px;")
+        title = QLabel("Metas (opcional)")
+        title.setStyleSheet(SECTION_STYLE)
         layout.addWidget(title)
 
         intro = QLabel(
@@ -50,7 +54,7 @@ class GoalsPanel(QWidget):
             "agotado antes. Sin metas, todo queda como siempre."
         )
         intro.setWordWrap(True)
-        intro.setStyleSheet(f"color: {INK_SOFT};")
+        intro.setStyleSheet(NOTE_STYLE)
         layout.addWidget(intro)
 
         self.table = QTableWidget(0, len(COLUMNS))

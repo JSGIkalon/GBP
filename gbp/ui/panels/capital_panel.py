@@ -20,7 +20,12 @@ from PySide6.QtWidgets import (
 
 from ...model.scenario import Scenario
 from ...model.strategy import Strategy
-from ..theme import INK, INK_SOFT, format_money, use_thousands_dot
+from ..theme import (
+    INK,
+    NOTE_STYLE,
+    format_money,
+    use_thousands_dot,
+)
 
 
 class CapitalPanel(QWidget):
@@ -46,7 +51,7 @@ class CapitalPanel(QWidget):
 
         self.inherited = QLabel("")
         self.inherited.setWordWrap(True)
-        self.inherited.setStyleSheet(f"color: {INK_SOFT};")
+        self.inherited.setStyleSheet(NOTE_STYLE)
         layout.addWidget(self.inherited)
 
         form = QFormLayout()
@@ -71,7 +76,7 @@ class CapitalPanel(QWidget):
             "de la comparación y no se pueden cambiar por estrategia."
         )
         note.setWordWrap(True)
-        note.setStyleSheet(f"color: {INK_SOFT};")
+        note.setStyleSheet(NOTE_STYLE)
         layout.addWidget(note)
         layout.addStretch(1)
 

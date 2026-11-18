@@ -24,7 +24,12 @@ from PySide6.QtWidgets import (
 from ...model.leverage import Amortization, InterestMode, LoanTerms, RateMode
 from ...model.scenario import Scenario
 from ...model.strategy import Strategy
-from ..theme import INK_SOFT, STATUS_WARNING, status_dot, use_thousands_dot
+from ..theme import (
+    NOTE_STYLE,
+    STATUS_WARNING,
+    status_dot,
+    use_thousands_dot,
+)
 
 
 class LeveragePanel(QWidget):
@@ -135,7 +140,7 @@ class LeveragePanel(QWidget):
             "intereses se capitalizan, el saldo remanente se cancela íntegro al vencimiento."
         )
         note.setWordWrap(True)
-        note.setStyleSheet(f"color: {INK_SOFT};")
+        note.setStyleSheet(NOTE_STYLE)
         layout.addWidget(note)
         layout.addStretch(1)
 

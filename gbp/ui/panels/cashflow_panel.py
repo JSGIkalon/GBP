@@ -30,7 +30,11 @@ from ...model.cashflows import (
 )
 from ...model.scenario import Scenario
 from ...model.strategy import Strategy
-from ..theme import INK, INK_SOFT, format_money
+from ..theme import (
+    INK,
+    NOTE_STYLE,
+    format_money,
+)
 
 # Encabezados cortos: con los nombres completos la tabla no cabía en el panel
 # y Qt recortaba las últimas columnas. El significado va en el tooltip.
@@ -128,7 +132,7 @@ class CashflowPanel(QWidget):
 
         self.summary = QLabel("")
         self.summary.setWordWrap(True)
-        self.summary.setStyleSheet(f"color: {INK_SOFT};")
+        self.summary.setStyleSheet(NOTE_STYLE)
         layout.addWidget(self.summary)
 
         self.reload(scenario, strategy)

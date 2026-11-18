@@ -17,7 +17,13 @@ from PySide6.QtWidgets import (
 
 from ...io import library
 from ...model.scenario import SimulationSettings
-from ..theme import BLUE_MID, INK, INK_SOFT, SCALE_LABELS, use_thousands_dot
+from ..theme import (
+    INK,
+    NOTE_STYLE,
+    SCALE_LABELS,
+    SECTION_STYLE,
+    use_thousands_dot,
+)
 
 
 class SettingsPanel(QWidget):
@@ -71,13 +77,13 @@ class SettingsPanel(QWidget):
             "estabiliza las colas de la distribución; bajarlo solo acelera casos de prueba."
         )
         note.setWordWrap(True)
-        note.setStyleSheet(f"color: {INK_SOFT};")
+        note.setStyleSheet(NOTE_STYLE)
         layout.addWidget(note)
 
         # --- Vista en pesos -------------------------------------------------
         layout.addSpacing(12)
-        title = QLabel("LECTURA DE LAS CIFRAS")
-        title.setStyleSheet(f"color: {BLUE_MID}; font-weight: 600; letter-spacing: 2px;")
+        title = QLabel("Lectura de las cifras")
+        title.setStyleSheet(SECTION_STYLE)
         layout.addWidget(title)
 
         cop_form = QFormLayout()
@@ -103,12 +109,12 @@ class SettingsPanel(QWidget):
             "ingresando en cifra completa."
         )
         cop_note.setWordWrap(True)
-        cop_note.setStyleSheet(f"color: {INK_SOFT};")
+        cop_note.setStyleSheet(NOTE_STYLE)
         layout.addWidget(cop_note)
 
         self.path_label = QLabel("")
         self.path_label.setWordWrap(True)
-        self.path_label.setStyleSheet(f"color: {INK_SOFT};")
+        self.path_label.setStyleSheet(NOTE_STYLE)
         layout.addWidget(self.path_label)
 
         reset = QPushButton("Restaurar valores por defecto")

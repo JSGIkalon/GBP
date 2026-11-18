@@ -20,31 +20,35 @@ tonos: la interfaz impide agregar más estrategias.
 
 from __future__ import annotations
 
-# --- Gama del handoff de diseño 2026 ---------------------------------------
-NAVY = "#0B2A36"          # Fondos institucionales, texto display, estructura
-EMPHASIS = "#007ABA"      # ÚNICO texto de énfasis sobre blanco. Nunca como relleno.
-BLUE_MID = "#4D849E"      # "Teal": estructura y etiquetas secundarias. No es énfasis.
-TEAL_DARK = "#0B617D"     # Condiciones/anotaciones sobre tramos con relleno
-CYAN = "#1BA9E6"          # Rellenos y acento sobre navy. Nunca texto sobre blanco.
-BLUE_LIGHT = "#8ED3F0"    # Jerarquía de relleno terciario
-NEUTRAL = "#E1E6EA"       # "Hairline": segmentos neutros y filas de tabla de bajo contraste
-LEADER = "#9BB9CC"        # "Teal soft": líder-lines únicamente
-FILL_SOFT = "#C8DAE3"     # "Teal pale": rellenos suaves bajo líneas (p.ej. deuda)
-PANEL = "#F7F9FA"         # Fondo de panel lateral
-INK = "#3D5560"           # Texto cuerpo
-INK_SOFT = "#5B7280"      # "Muted": captions, etiquetas, fuente al pie
+# --- Paleta "Modern Financial Terminal" (rediseño 0.5) ----------------------
+# Los nombres históricos se conservan como alias: el informe PDF y los paneles
+# los importan, y así heredan la paleta nueva sin tocarse uno por uno.
+NAVY = "#102D43"          # Azul petróleo: barra lateral, títulos, botón principal
+PRIMARY = "#1D5B85"       # Azul financiero: énfasis, selección, mediana
+CHART = "#55B8E8"         # Azul claro para bandas de gráficos
+BG = "#F4F7FA"            # Fondo general de la aplicación
+BORDER = "#E3E8EE"        # Bordes de tarjetas y campos
+POSITIVE = "#16A085"      # Resultados positivos
+NEGATIVE = "#B03A2E"      # Cifras negativas en tablas (sobrio, no alarmista)
+EMPHASIS = PRIMARY
+BLUE_MID = "#5E7A8F"      # Etiquetas de grupo y encabezados secundarios
+TEAL_DARK = "#174A6C"
+CYAN = CHART
+BLUE_LIGHT = "#A8DBF3"
+NEUTRAL = "#E6EBF0"       # Hairline
+LEADER = "#A9BACA"
+FILL_SOFT = "#CFE3EF"
+PANEL = BG
+INK = "#22384A"           # Texto cuerpo
+INK_SOFT = "#6B7F8F"      # Información secundaria
 WHITE = "#FFFFFF"
-SERIES_FOURTH = "#2E5F7A"  # cuarto paso de la serie, distinto del teal de estructura
+SERIES_FOURTH = "#2E6E99"
 
 # --- Series de datos -------------------------------------------------------
-# El orden de los pasos NO es el de la rampa: está elegido para que las primeras
-# series sean las más separadas entre sí, porque casi todos los casos comparan
-# dos o tres estrategias. Navy (muy oscuro), cyan (brillante) y azul claro
-# (pálido) se distinguen sin esfuerzo; el cuarto paso queda al final porque es
-# el que más se confunde con el navy. Orden fijo del handoff de diseño 2026.
-SERIES = [NAVY, CYAN, BLUE_LIGHT, SERIES_FOURTH]
+# Pasos de una rampa azul, alternando oscuro y claro para separar vecinas.
+SERIES = [NAVY, CHART, PRIMARY, BLUE_LIGHT]
 # Texto legible encima de cada relleno.
-SERIES_TEXT = [WHITE, INK, INK, WHITE]
+SERIES_TEXT = [WHITE, INK, WHITE, INK]
 
 MAX_SERIES = len(SERIES)
 
@@ -55,11 +59,44 @@ STATUS_CRITICAL = "#C0392B"
 
 # --- Chrome de los gráficos ------------------------------------------------
 SURFACE = WHITE
-GRIDLINE = NEUTRAL
+GRIDLINE = "#EDF1F5"
 BASELINE = LEADER
 
-FONT_FAMILY = ["Jost", "Calibri", "system-ui", "sans-serif"]
-FONT_STACK = '"Jost", "Calibri", system-ui, sans-serif'
+FONT_FAMILY = ["Inter", "Jost", "Calibri", "system-ui", "sans-serif"]
+FONT_STACK = '"Inter", "Jost", "Calibri", system-ui, sans-serif'
+_fonts_registered = False
+
+
+def register_fonts() -> None:
+    """Registra Inter (empaquetada en gbp/data/fonts) en Qt y en matplotlib.
+
+    Sin ella instalada en el equipo, Qt y el PDF caerían en Calibri. Se llama
+    al crear la ventana y al dibujar; es idempotente. Para Qt hace falta una
+    QApplication viva, así que esa parte solo corre si existe.
+    """
+    global _fonts_registered
+    from ..model.correlation import data_dir
+
+    folder = data_dir() / "fonts"
+    files = sorted(folder.glob("*.ttf")) if folder.exists() else []
+    if not _fonts_registered:
+        try:
+            from matplotlib import font_manager
+
+            for f in files:
+                font_manager.fontManager.addfont(str(f))
+        except Exception:  # noqa: BLE001 — sin la fuente el gráfico sale igual
+            pass
+    try:
+        from PySide6.QtGui import QFontDatabase
+        from PySide6.QtWidgets import QApplication
+
+        if QApplication.instance() is not None and "Inter" not in QFontDatabase.families():
+            for f in files:
+                QFontDatabase.addApplicationFont(str(f))
+    except Exception:  # noqa: BLE001
+        pass
+    _fonts_registered = True
 
 
 def series_color(index: int) -> str:
@@ -97,6 +134,7 @@ def apply_matplotlib_style() -> None:
     """Estilo base: fondo blanco, rejilla discreta, sin marcos."""
     import matplotlib as mpl
 
+    register_fonts()
     mpl.rcParams.update(
         {
             "figure.facecolor": SURFACE,
@@ -107,7 +145,7 @@ def apply_matplotlib_style() -> None:
             "font.size": 9,
             "text.color": INK,
             "axes.labelcolor": INK_SOFT,
-            "axes.edgecolor": LEADER,
+            "axes.edgecolor": NEUTRAL,
             "axes.linewidth": 0.8,
             "axes.titlecolor": INK,
             "axes.titlesize": 11.5,
@@ -115,7 +153,7 @@ def apply_matplotlib_style() -> None:
             "axes.grid": True,
             "axes.axisbelow": True,
             "grid.color": GRIDLINE,
-            "grid.linewidth": 0.8,
+            "grid.linewidth": 0.6,
             "xtick.color": INK_SOFT,
             "ytick.color": INK_SOFT,
             "xtick.labelcolor": INK_SOFT,
@@ -132,7 +170,7 @@ def clean_axes(ax) -> None:
     for side in ("top", "right", "left"):
         ax.spines[side].set_visible(False)
     ax.spines["bottom"].set_color(BASELINE)
-    ax.grid(axis="y", color=GRIDLINE, linewidth=0.8)
+    ax.grid(axis="y", color=GRIDLINE, linewidth=0.6)
     ax.grid(axis="x", visible=False)
     ax.tick_params(length=0)
 
@@ -243,10 +281,19 @@ def money_axis(ax, axis: str = "y", scale: str | None = None) -> None:
     (ax.yaxis if axis == "y" else ax.xaxis).set_major_formatter(formatter)
 
 
+# Títulos de grupo dentro de los paneles: semibold en azul petróleo, con una
+# línea fina arriba que separa el grupo del anterior.
+SECTION_STYLE = (
+    f"color: {NAVY}; font-weight: 600; font-size: 14px; "
+    f"border-top: 1px solid {BORDER}; padding-top: 12px; margin-top: 4px;"
+)
+INLINE_LABEL_STYLE = f"color: {NAVY}; font-weight: 600;"
+NOTE_STYLE = f"color: {INK_SOFT}; font-size: 12px;"
+
 # --- Hoja de estilo de la interfaz ----------------------------------------
-# Sin marcos de card ni bordes de caja: el orden lo da el espacio y la
-# jerarquía tipográfica. Las tablas conservan separador de fila, que es uno de
-# los usos de línea permitidos.
+# "Modern Financial Terminal": fondo gris azulado, superficies blancas con
+# borde de 1 px y radio corto, sin sombras ni gradientes. La barra lateral va
+# en azul petróleo. Las pestañas marcan la selección con un subrayado.
 STYLESHEET = f"""
 QWidget {{
     background-color: {WHITE};
@@ -255,51 +302,164 @@ QWidget {{
     font-size: 13px;
 }}
 
-QMainWindow, QTabWidget::pane, QSplitter {{
-    background-color: {WHITE};
+QMainWindow, QWidget#appRoot, QWidget#workArea {{
+    background-color: {BG};
 }}
 
+/* --- Barra lateral ------------------------------------------------------ */
+QFrame#sidebar, QFrame#sidebar QWidget {{
+    background-color: {NAVY};
+    color: #C9D6E1;
+}}
+QFrame#sidebar QToolButton {{
+    background-color: transparent;
+    color: #C9D6E1;
+    border: none;
+    border-left: 3px solid transparent;
+    padding: 10px 6px 10px 14px;
+    font-size: 12px;
+    text-align: left;
+}}
+QFrame#sidebar QToolButton:hover {{
+    background-color: #183B55;
+    color: {WHITE};
+}}
+QFrame#sidebar QToolButton:checked {{
+    background-color: #1A4361;
+    color: {WHITE};
+    font-weight: 600;
+    border-left: 3px solid {CHART};
+}}
+QFrame#sidebar QLabel#sidebarCaption {{
+    color: #7F97AB;
+    font-size: 10px;
+    padding: 0 16px;
+}}
+
+/* --- Tarjetas ----------------------------------------------------------- */
+QFrame#card {{
+    background-color: {WHITE};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+}}
+QLabel#cardTitle {{
+    color: {NAVY};
+    font-size: 15px;
+    font-weight: 600;
+    background-color: transparent;
+}}
+QFrame#kpiCard {{
+    background-color: {WHITE};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+}}
+QFrame#kpiCard[accent="true"] {{
+    background-color: #EAF3FA;
+    border: 1px solid #D3E5F3;
+}}
+QFrame#kpiCard QLabel {{
+    background-color: transparent;
+}}
+QLabel#kpiTitle {{
+    color: {INK_SOFT};
+    font-size: 12px;
+    font-weight: 500;
+}}
+QLabel#kpiValue {{
+    color: {NAVY};
+    font-size: 24px;
+    font-weight: 600;
+}}
+QLabel#kpiUnit {{
+    color: {INK_SOFT};
+    font-size: 11px;
+}}
+
+/* --- Pestañas ----------------------------------------------------------- */
 QTabWidget::pane {{
     border: none;
+    border-top: 1px solid {BORDER};
     top: -1px;
+    background-color: {WHITE};
 }}
-
+QTabBar {{
+    background-color: transparent;
+}}
 QTabBar::tab {{
     background: transparent;
     color: {INK_SOFT};
-    padding: 9px 16px;
-    margin-right: 4px;
+    padding: 9px 12px;
+    margin-right: 0px;
     border: none;
+    border-bottom: 2px solid transparent;
     font-size: 13px;
 }}
 QTabBar::tab:selected {{
     color: {NAVY};
     font-weight: 600;
-    border-bottom: 2px solid {EMPHASIS};
+    border-bottom: 2px solid {PRIMARY};
 }}
 QTabBar::tab:hover:!selected {{
     color: {NAVY};
 }}
 
-QLabel[role="lede"] {{
-    font-size: 16px;
-    font-weight: 600;
+QTabWidget#resultsTabs > QTabBar::tab {{
+    padding: 9px 10px;
+    font-size: 12px;
+}}
+
+/* Pestañas del panel de parámetros: segmentadas y compactas. */
+QTabWidget#inputsTabs::pane {{
+    border: none;
+    top: 0px;
+}}
+QTabWidget#inputsTabs > QTabBar::tab {{
+    background-color: {BG};
     color: {INK};
+    border: 1px solid {BORDER};
+    padding: 6px 12px;
+    margin: 0px 0px 8px 0px;
+    font-size: 12px;
+}}
+QTabWidget#inputsTabs > QTabBar::tab:first {{
+    border-top-left-radius: 4px;
+    border-bottom-left-radius: 4px;
+}}
+QTabWidget#inputsTabs > QTabBar::tab:last {{
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+}}
+QTabWidget#inputsTabs > QTabBar::tab:selected {{
+    background-color: {NAVY};
+    color: {WHITE};
+    border: 1px solid {NAVY};
+    font-weight: 600;
+}}
+QTabWidget#inputsTabs > QTabBar::tab:hover:!selected {{
+    background-color: #E9EFF5;
+}}
+
+/* --- Tipografía por rol ------------------------------------------------- */
+QLabel[role="lede"] {{
+    font-size: 15px;
+    font-weight: 600;
+    color: {NAVY};
 }}
 QLabel[role="note"] {{
     color: {INK_SOFT};
-    font-size: 12px;
+    font-size: 11px;
 }}
 QLabel[role="eyebrow"] {{
-    color: {BLUE_MID};
-    font-size: 12px;
+    color: {NAVY};
+    font-size: 13px;
     font-weight: 600;
-    letter-spacing: 2px;
 }}
 
 QGroupBox {{
     border: none;
-    margin-top: 18px;
+    border-top: 1px solid {BORDER};
+    margin-top: 22px;
+    padding-top: 8px;
     font-weight: 600;
     color: {NAVY};
 }}
@@ -309,122 +469,197 @@ QGroupBox::title {{
     padding: 0 0 6px 0;
 }}
 
-QTableWidget {{
+/* --- Tablas ------------------------------------------------------------- */
+QTableWidget, QTableView {{
     background-color: {WHITE};
-    alternate-background-color: {PANEL};
+    alternate-background-color: #FAFBFD;
     gridline-color: transparent;
-    border: none;
-    selection-background-color: {NEUTRAL};
-    selection-color: {INK};
+    border: 1px solid {BORDER};
+    border-radius: 4px;
+    selection-background-color: #E3EFF8;
+    selection-color: {NAVY};
 }}
 QTableWidget::item {{
-    border-bottom: 1px solid {NEUTRAL};
-    padding: 5px 8px;
+    border-bottom: 1px solid #EEF2F6;
+    padding: 4px 10px;
+}}
+QHeaderView {{
+    background-color: {BG};
 }}
 QHeaderView::section {{
-    background-color: {WHITE};
-    color: {BLUE_MID};
+    background-color: {BG};
+    color: {NAVY};
     border: none;
-    border-bottom: 2px solid {NEUTRAL};
-    padding: 7px 8px;
+    border-bottom: 1px solid {BORDER};
+    padding: 7px 10px;
     font-weight: 600;
+    font-size: 12px;
+}}
+QTableCornerButton::section {{
+    background-color: {BG};
+    border: none;
 }}
 
+/* --- Campos ------------------------------------------------------------- */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     background-color: {WHITE};
-    border: none;
-    border-radius: 0px;
-    border-bottom: 1px solid {LEADER};
-    padding: 6px 4px;
+    border: 1px solid #D5DDE5;
+    border-radius: 4px;
+    padding: 5px 8px;
     color: {INK};
 }}
+QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {{
+    border: 1px solid {LEADER};
+}}
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
-    border-bottom: 2px solid {EMPHASIS};
+    border: 1px solid {PRIMARY};
 }}
 QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {{
     color: {LEADER};
+    background-color: {BG};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 22px;
+}}
+QComboBox QAbstractItemView {{
+    border: 1px solid {BORDER};
+    selection-background-color: #E3EFF8;
+    selection-color: {NAVY};
 }}
 
+/* --- Botones ------------------------------------------------------------ */
 QPushButton {{
     background-color: {WHITE};
     color: {NAVY};
-    border: none;
-    border-bottom: 2px solid {NEUTRAL};
+    border: 1px solid #D0D9E2;
+    border-radius: 4px;
     padding: 7px 14px;
-    font-weight: 600;
-    border-radius: 0px;
+    font-weight: 500;
 }}
 QPushButton:hover {{
-    border-bottom: 2px solid {EMPHASIS};
-    color: {EMPHASIS};
+    border: 1px solid {PRIMARY};
+    color: {PRIMARY};
+    background-color: #F5F9FC;
 }}
 QPushButton:disabled {{
     color: {LEADER};
+    border: 1px solid {NEUTRAL};
 }}
-
 QPushButton#runButton {{
     background-color: {NAVY};
     color: {WHITE};
-    border: none;
-    border-radius: 3px;
-    padding: 11px 22px;
+    border: 1px solid {NAVY};
+    padding: 10px 22px;
     font-size: 14px;
     font-weight: 600;
 }}
 QPushButton#runButton:hover {{
-    background-color: #061A22;
+    background-color: {PRIMARY};
+    border: 1px solid {PRIMARY};
 }}
 QPushButton#runButton:disabled {{
     background-color: {LEADER};
+    border: 1px solid {LEADER};
     color: {WHITE};
+}}
+QPushButton#exportButton {{
+    padding: 10px 18px;
+    font-size: 14px;
+}}
+QToolButton#collapseButton {{
+    background-color: transparent;
+    border: 1px solid {BORDER};
+    border-radius: 4px;
+    color: {INK_SOFT};
+    padding: 2px 6px;
+}}
+QToolButton#collapseButton:hover {{
+    color: {PRIMARY};
+    border: 1px solid {PRIMARY};
+}}
+
+QLabel#statusLabel {{
+    color: {INK_SOFT};
+    background-color: transparent;
+}}
+QLabel#currencyBanner {{
+    background-color: #EAF3FA;
+    color: {NAVY};
+    border: 1px solid #D3E5F3;
+    border-radius: 4px;
+    font-weight: 600;
+    padding: 6px 12px;
 }}
 
 QProgressBar {{
     border: none;
+    border-radius: 3px;
     background-color: {NEUTRAL};
     text-align: center;
     color: {NAVY};
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
 }}
 QProgressBar::chunk {{
-    background-color: {CYAN};
+    background-color: {CHART};
+    border-radius: 3px;
 }}
 
 QCheckBox {{
     spacing: 8px;
+    background-color: transparent;
 }}
 
-QMenuBar, QMenu {{
+QMenuBar {{
     background-color: {WHITE};
     color: {INK};
+    border-bottom: 1px solid {BORDER};
+}}
+QMenu {{
+    background-color: {WHITE};
+    color: {INK};
+    border: 1px solid {BORDER};
 }}
 QMenuBar::item:selected, QMenu::item:selected {{
-    background-color: {NEUTRAL};
+    background-color: #E3EFF8;
     color: {NAVY};
 }}
 
 QStatusBar {{
     background-color: {WHITE};
     color: {INK_SOFT};
-    border-top: 1px solid {NEUTRAL};
+    border-top: 1px solid {BORDER};
+    font-size: 11px;
 }}
 
-QSplitter::handle {{
-    background-color: {NEUTRAL};
-    width: 1px;
+QSplitter, QSplitter::handle {{
+    background-color: {BG};
 }}
 
-QScrollBar:vertical, QScrollBar:horizontal {{
-    background: {WHITE};
+QScrollArea {{
     border: none;
 }}
+QScrollBar:vertical, QScrollBar:horizontal {{
+    background: transparent;
+    border: none;
+    width: 10px;
+    height: 10px;
+}}
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {{
-    background: {LEADER};
+    background: #C8D3DD;
     border-radius: 4px;
+    min-height: 24px;
+    min-width: 24px;
 }}
 QScrollBar::add-line, QScrollBar::sub-line {{
     height: 0px;
     width: 0px;
+}}
+QToolTip {{
+    background-color: {NAVY};
+    color: {WHITE};
+    border: none;
+    padding: 5px 8px;
 }}
 """

@@ -38,7 +38,12 @@ from PySide6.QtWidgets import (
 from ...io import library
 from ...model.assets import AssetClass, CMASet
 from ...model.groups import group_of
-from ..theme import INK, INK_SOFT, NEUTRAL
+from ..theme import (
+    INK,
+    INK_SOFT,
+    NEUTRAL,
+    NOTE_STYLE,
+)
 
 COLUMNS = [
     "Clase de activo", "Origen", "Clase", "Retorno compuesto %",
@@ -81,7 +86,7 @@ class AssetsPanel(QWidget):
 
         source = QLabel(self._source_note())
         source.setWordWrap(True)
-        source.setStyleSheet(f"color: {INK_SOFT};")
+        source.setStyleSheet(NOTE_STYLE)
         layout.addWidget(source)
 
         filtros = QHBoxLayout()
@@ -124,7 +129,7 @@ class AssetsPanel(QWidget):
         layout.addLayout(botones)
 
         self.status = QLabel("")
-        self.status.setStyleSheet(f"color: {INK_SOFT};")
+        self.status.setStyleSheet(NOTE_STYLE)
         layout.addWidget(self.status)
 
         self.reload(cmas)

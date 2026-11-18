@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -38,7 +39,12 @@ from ..charts.canvas import ChartCanvas
 from ..charts.debt_chart import draw_debt_chart
 from ..charts.distribution import BOXES, CHART_KINDS, draw_distribution, normalize_kind
 from ..table_copy import enable_copy
-from ..theme import INK_SOFT, amount_unit, format_display
+from ..theme import (
+    NEGATIVE,
+    NOTE_STYLE,
+    amount_unit,
+    format_display,
+)
 
 EMPTY = "Carga los datos del caso y pulsa «Correr simulación»."
 
@@ -49,10 +55,13 @@ def _table(columns: list[str]) -> QTableWidget:
     table.verticalHeader().setVisible(False)
     table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     table.setAlternatingRowColors(True)
+    table.verticalHeader().setDefaultSectionSize(28)
     header = table.horizontalHeader()
-    header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-    for i in range(1, len(columns)):
+    # Todas al ancho de su contenido —el nombre de la estrategia completo, no
+    # «Porta…»—; si no caben, la tabla se desplaza.
+    for i in range(len(columns)):
         header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
+    header.setStretchLastSection(False)
     # Toda tabla de resultados se puede llevar a Excel: Ctrl+C o clic derecho.
     enable_copy(table)
     return table
@@ -78,6 +87,9 @@ def _fill(table: QTableWidget, rows: list[dict], columns: list[str]):
             item = QTableWidgetItem(str(row.get(column, "")))
             if c > 0:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                # Las cifras negativas se distinguen sin alarmar: solo el color.
+                if item.text().startswith("-"):
+                    item.setForeground(QColor(NEGATIVE))
             table.setItem(r, c, item)
 
 
@@ -150,7 +162,7 @@ class ResultsPanel(QTabWidget):
             "la del último año es la probabilidad de éxito del plan."
         )
         flows_note.setWordWrap(True)
-        flows_note.setStyleSheet(f"color: {INK_SOFT};")
+        flows_note.setStyleSheet(NOTE_STYLE)
         f_layout.addWidget(flows_note)
         self.addTab(flows, "Flujos y valor")
 
@@ -171,7 +183,7 @@ class ResultsPanel(QTabWidget):
             "crece o ya se está consumiendo. Las cifras en dinero son nominales."
         )
         note.setWordWrap(True)
-        note.setStyleSheet(f"color: {INK_SOFT};")
+        note.setStyleSheet(NOTE_STYLE)
         s_layout.addWidget(note)
         self.addTab(summary, "Supuestos")
 
@@ -191,7 +203,7 @@ class ResultsPanel(QTabWidget):
             "cargan siempre por sub-clase."
         )
         allocation_note.setWordWrap(True)
-        allocation_note.setStyleSheet(f"color: {INK_SOFT};")
+        allocation_note.setStyleSheet(NOTE_STYLE)
         a_layout.addWidget(allocation_note)
         self.addTab(allocation, "Asignación")
 
@@ -218,7 +230,7 @@ class ResultsPanel(QTabWidget):
             "cambian la simulación: se miden sobre los mismos caminos."
         )
         goals_note.setWordWrap(True)
-        goals_note.setStyleSheet(f"color: {INK_SOFT};")
+        goals_note.setStyleSheet(NOTE_STYLE)
         g_layout.addWidget(goals_note)
 
         self.clear()
@@ -254,7 +266,7 @@ class ResultsPanel(QTabWidget):
         layout.addWidget(table, 2)
         label = QLabel(note)
         label.setWordWrap(True)
-        label.setStyleSheet(f"color: {INK_SOFT};")
+        label.setStyleSheet(NOTE_STYLE)
         layout.addWidget(label)
         self.addTab(page, title)
         return canvas, table

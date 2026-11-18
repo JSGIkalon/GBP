@@ -17,12 +17,11 @@ que se abre el abanico y el que ancla la lectura de todo lo demás.
 from __future__ import annotations
 
 import numpy as np
-from matplotlib.patheffects import withStroke
 
 from ...model.results import SimulationResult
 from ..theme import (
     BASELINE,
-    INK,
+    NAVY,
     INK_SOFT,
     SURFACE,
     amount_unit,
@@ -85,19 +84,19 @@ def draw_fan_chart(canvas, result: SimulationResult, years: list[int], real: boo
         data = _series(strategy, real)
         by_axes[ax] = (strategy.name, data)
 
-        ax.fill_between(x, data[10], data[90], color=color, alpha=0.20, linewidth=0, zorder=2)
-        ax.fill_between(x, data[25], data[75], color=color, alpha=0.42, linewidth=0, zorder=3)
-        ax.plot(x, data[50], color=color, linewidth=2, zorder=4)
+        ax.fill_between(x, data[10], data[90], color=color, alpha=0.16, linewidth=0, zorder=2)
+        ax.fill_between(x, data[25], data[75], color=color, alpha=0.36, linewidth=0, zorder=3)
+        ax.plot(x, data[50], color=color, linewidth=2.2, zorder=4)
         ax.axhline(0, color=BASELINE, linewidth=1, zorder=1)
 
         # La mediana final, rotulada sobre su punto: es la cifra que se busca.
         ax.annotate(
             format_display(float(data[50][-1])),
             xy=(x[-1], data[50][-1]), xytext=(-3, 4), textcoords="offset points",
-            ha="right", va="bottom", fontsize=8, fontweight="semibold", color=INK, zorder=6,
-            # Halo blanco: la cifra cae sobre la banda, que en la serie navy es
-            # casi tan oscura como el texto.
-            path_effects=[withStroke(linewidth=2.6, foreground=SURFACE)],
+            ha="right", va="bottom", fontsize=8, fontweight="semibold", color=SURFACE, zorder=6,
+            # Rótulo en caja navy: se lee igual sobre cualquier banda.
+            bbox=dict(boxstyle="round,pad=0.3,rounding_size=0.15", facecolor=NAVY,
+                      edgecolor="none"),
         )
 
         if len(strategies) >= 2:

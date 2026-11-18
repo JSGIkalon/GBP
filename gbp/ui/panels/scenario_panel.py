@@ -17,9 +17,10 @@ from PySide6.QtWidgets import (
 
 from ...model.scenario import PesoAssumptions, Scenario
 from ..theme import (
-    BLUE_MID,
     INK,
     INK_SOFT,
+    NOTE_STYLE,
+    SECTION_STYLE,
     STATUS_WARNING,
     format_money,
     format_number,
@@ -99,13 +100,13 @@ class ScenarioPanel(QWidget):
             "en Ajustes."
         )
         note.setWordWrap(True)
-        note.setStyleSheet(f"color: {INK_SOFT};")
+        note.setStyleSheet(NOTE_STYLE)
         layout.addWidget(note)
 
         # --- Pesos colombianos (opcional) ------------------------------------
         layout.addSpacing(8)
-        peso_title = QLabel("PESOS COLOMBIANOS (OPCIONAL)")
-        peso_title.setStyleSheet(f"color: {BLUE_MID}; font-weight: 600; letter-spacing: 2px;")
+        peso_title = QLabel("Pesos colombianos (opcional)")
+        peso_title.setStyleSheet(SECTION_STYLE)
         layout.addWidget(peso_title)
         peso_form = QFormLayout()
         peso_form.setSpacing(10)
@@ -148,7 +149,7 @@ class ScenarioPanel(QWidget):
             "agrega riesgo cambiario."
         )
         peso_note.setWordWrap(True)
-        peso_note.setStyleSheet(f"color: {INK_SOFT};")
+        peso_note.setStyleSheet(NOTE_STYLE)
         layout.addWidget(peso_note)
 
         layout.addSpacing(8)
@@ -161,13 +162,16 @@ class ScenarioPanel(QWidget):
         # La app abre la primera vez con el caso de ejemplo y desde entonces
         # restaura la sesión anterior, así que sin esto las tres estrategias de
         # ejemplo vuelven para siempre y no hay forma de sacarlas todas juntas.
+        actions_title = QLabel("Acciones")
+        actions_title.setStyleSheet(SECTION_STYLE)
+        layout.addWidget(actions_title)
         reset_note = QLabel(
             "Vacía el caso por completo —capital, horizonte, inflación y todas las "
             "estrategias— y olvida la sesión guardada. Los supuestos de mercado no "
             "se tocan."
         )
         reset_note.setWordWrap(True)
-        reset_note.setStyleSheet(f"color: {INK_SOFT};")
+        reset_note.setStyleSheet(NOTE_STYLE)
         layout.addWidget(reset_note)
 
         self.reset_button = QPushButton("Empezar de cero")

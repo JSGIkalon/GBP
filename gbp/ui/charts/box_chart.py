@@ -19,6 +19,7 @@ import numpy as np
 from ...model.results import SimulationResult
 from ..theme import (
     BASELINE,
+    SCALES,
     INK_SOFT,
     amount_unit,
     clean_axes,
@@ -237,6 +238,12 @@ def _chart_style(ax, boxes, box_width: float) -> dict:
     El eje dice en qué escala quedó. Las etiquetas nunca van verticales.
     """
     scales = larger_scales()
+    # Solo escalas en que las cifras siguen diciendo algo: en miles de millones
+    # un patrimonio de 30 millones se lee «0,0» y el eje entero repite «0,1».
+    # Si ni así caben, se omiten las medianas que chocan (`_label_boxes`); la
+    # cifra sigue en la tabla y en el tooltip.
+    top = max((abs(stat["med"]) for _pos, stat, *_ in boxes), default=0.0)
+    scales = [s for i, s in enumerate(scales) if i == 0 or top / SCALES[s][0] >= 1.0]
     # Antes una escala mayor con letra normal que una cifra diminuta: la letra
     # solo se achica si ni en miles de millones cabe a tamaño normal.
     for fontsize in (MEDIAN_FONT, 7.0, MIN_MEDIAN_FONT):
@@ -295,6 +302,7 @@ def _label_boxes(ax, boxes, box_width: float, style: dict, show_percentiles: boo
     axes_px = ax.get_window_extent(renderer)
 
     placed: list[tuple] = []
+    medians_ok = True
     for pos, stat, on_fill, fill in boxes:
         text = ax.text(
             pos, stat["med"], format_display(stat["med"], scale),
@@ -305,10 +313,17 @@ def _label_boxes(ax, boxes, box_width: float, style: dict, show_percentiles: boo
             bbox=dict(boxstyle="square,pad=0.12", facecolor=fill, edgecolor="none"),
         )
         # El fondo de la mediana (pad 0.12 del tamaño de letra) también ocupa.
-        placed.append(padded(text.get_window_extent(renderer), 0.12 * fontsize * points))
+        box = padded(text.get_window_extent(renderer), 0.12 * fontsize * points)
+        # Solo pasa cuando ninguna escala legible alcanzó: antes que montar una
+        # cifra sobre otra, se omite (está en la tabla y en el tooltip).
+        if any(hit(box, other) for other in placed):
+            text.remove()
+            medians_ok = False
+            continue
+        placed.append(box)
 
     if not show_percentiles:
-        return True
+        return medians_ok
 
     # Prioridad: primero los extremos de todas las cajas, luego los cuartiles.
     # Si hay que sacrificar algo, que sea lo que está más cerca de la mediana.
@@ -320,7 +335,7 @@ def _label_boxes(ax, boxes, box_width: float, style: dict, show_percentiles: boo
         candidates.append((k, pos, stat["q3"], "top", -1, on_fill, True))
         candidates.append((k, pos, stat["q1"], "bottom", 1, on_fill, True))
 
-    all_fit = True
+    all_fit = medians_ok
     for k, pos, value, va, dy, color, inside in candidates:
         text = ax.text(
             pos, value, format_display(value, scale), ha="center", va=va,

@@ -35,10 +35,11 @@ from ...model.groups import group_weights
 from ...model.scenario import Scenario
 from ...model.strategy import Strategy
 from ..theme import (
-    BLUE_MID,
     INK,
     INK_SOFT,
+    INLINE_LABEL_STYLE,
     MAX_SERIES,
+    NOTE_STYLE,
     STATUS_CRITICAL,
     STATUS_GOOD,
     series_color,
@@ -92,8 +93,8 @@ class StrategiesPanel(QWidget):
         block = QVBoxLayout()
 
         row = QHBoxLayout()
-        label = QLabel("ESTRATEGIA")
-        label.setStyleSheet(f"color: {BLUE_MID}; font-weight: 600; letter-spacing: 2px;")
+        label = QLabel("Estrategia")
+        label.setStyleSheet(INLINE_LABEL_STYLE)
         row.addWidget(label)
         self.selector = QComboBox()
         self.selector.currentIndexChanged.connect(self._on_select)
@@ -118,7 +119,7 @@ class StrategiesPanel(QWidget):
 
         self.badges = QLabel("")
         self.badges.setWordWrap(True)
-        self.badges.setStyleSheet(f"color: {INK_SOFT};")
+        self.badges.setStyleSheet(NOTE_STYLE)
         block.addWidget(self.badges)
 
         return block
@@ -187,9 +188,9 @@ class StrategiesPanel(QWidget):
         # Vista agrupada: 59 sub-clases no se leen en comité, cuatro sí. Es
         # derivada y de solo lectura — los pesos se cargan por sub-clase, que es
         # el nivel al que existen retorno, volatilidad y correlación.
-        grouped_label = QLabel("POR CLASE DE ACTIVO")
+        grouped_label = QLabel("Por clase de activo")
         grouped_label.setStyleSheet(
-            f"color: {BLUE_MID}; font-weight: 600; letter-spacing: 2px; font-size: 12px;"
+            INLINE_LABEL_STYLE
         )
         column.addWidget(grouped_label)
 

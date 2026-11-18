@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QDialog,
+    QFrame,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -35,7 +37,9 @@ from ..io.caseio import (
 from ..io.report import build_report
 from ..model.correlation import CorrelationMatrix
 from ..model.custom_assets import custom_pairs, extend_correlations, resolver_for
-from .brand import app_icon, symbol_pixmap, wordmark_pixmap
+from .brand import app_icon, wordmark_pixmap
+from .kpi_cards import KpiRow
+from .sidebar import Sidebar
 from .custom_asset_dialog import merge_custom_assets
 from .export_dialog import ExportDialog
 from .panels.assets_panel import AssetsPanel
@@ -47,13 +51,12 @@ from .panels.strategies_panel import StrategiesPanel
 from .sample_case import build_sample_case, empty_case
 from .solver_dialog import SolverDialog
 from .theme import (
-    INK,
     INK_SOFT,
-    NAVY,
     STYLESHEET,
     amount_unit,
     display_scale,
     format_number,
+    register_fonts,
     set_display_scale,
 )
 from .worker import start_simulation, start_task
@@ -66,8 +69,6 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("GBP — Proyección patrimonial")
         self.resize(1440, 900)
-        self.setStyleSheet(STYLESHEET)
-
         icon = app_icon()
         if icon is not None:
             self.setWindowIcon(icon)
@@ -144,18 +145,21 @@ class MainWindow(QMainWindow):
         return [name for name in self.cmas.names if name in known]
 
     def _build_ui(self):
+        register_fonts()
+        self.setStyleSheet(STYLESHEET)  # tras registrar Inter, para que la tome
+
         central = QWidget()
-        layout = QVBoxLayout(central)
-        layout.setSpacing(12)
-
-        layout.addLayout(self._build_brand_bar())
-
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        central.setObjectName("appRoot")
+        outer = QHBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
         # --- Entradas ---------------------------------------------------
         # Los flujos y el crédito ya no son pestañas propias: viven dentro de
         # cada estrategia, porque son suyos y no del escenario.
         self.inputs = QTabWidget()
+        self.inputs.setObjectName("inputsTabs")
+        self.inputs.setDocumentMode(True)
         self.scenario_panel = ScenarioPanel(self.scenario)
         self.strategies_panel = StrategiesPanel(
             self.scenario, self.cmas, self.available_assets, self.resolver
@@ -166,11 +170,13 @@ class MainWindow(QMainWindow):
 
         # Etiquetas cortas: con los nombres largos las cinco pestañas no caben
         # y Qt las esconde tras flechas de desplazamiento.
-        self.inputs.addTab(self.scenario_panel, "Escenario")
-        self.inputs.addTab(self.strategies_panel, "Estrategias")
-        self.inputs.addTab(self.assets_panel, "Activos")
-        self.inputs.addTab(self.correlation_panel, "Correlaciones")
-        self.inputs.addTab(self.settings_panel, "Ajustes")
+        sections = ["Escenario", "Estrategias", "Activos", "Correlaciones", "Ajustes"]
+        for panel, name in zip(
+            (self.scenario_panel, self.strategies_panel, self.assets_panel,
+             self.correlation_panel, self.settings_panel),
+            sections,
+        ):
+            self.inputs.addTab(panel, name)
         self.inputs.setTabToolTip(2, "Supuestos de mercado (CMAs): retorno, volatilidad y yield")
         self.inputs.setTabToolTip(4, "Configuración general de la aplicación")
 
@@ -181,30 +187,73 @@ class MainWindow(QMainWindow):
         self.settings_panel.changed.connect(self._on_settings_changed)
         self.settings_panel.view_changed.connect(self._apply_result_view)
 
-        splitter.addWidget(self.inputs)
+        # --- Barra lateral: otra puerta a las mismas pestañas -------------
+        self.sidebar = Sidebar(sections)
+        self.sidebar.section_selected.connect(self._go_to_section)
+        self.sidebar.about_requested.connect(self.show_about)
+        self.inputs.currentChanged.connect(self.sidebar.set_current)
+        self.sidebar.set_current(0)
+        outer.addWidget(self.sidebar)
+
+        work = QWidget()
+        work.setObjectName("workArea")
+        work_layout = QVBoxLayout(work)
+        work_layout.setContentsMargins(14, 14, 14, 10)
+        work_layout.setSpacing(0)
+        outer.addWidget(work, 1)
+
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(14)
+        self.splitter.setChildrenCollapsible(False)
+        work_layout.addWidget(self.splitter)
+
+        # --- Panel de parámetros (tarjeta contraíble) ----------------------
+        self.params_card = QFrame()
+        self.params_card.setObjectName("card")
+        params_layout = QVBoxLayout(self.params_card)
+        params_layout.setContentsMargins(16, 14, 16, 12)
+        params_layout.setSpacing(8)
+        header = QHBoxLayout()
+        title = QLabel("Parámetros")
+        title.setObjectName("cardTitle")
+        header.addWidget(title)
+        header.addStretch(1)
+        collapse = QToolButton()
+        collapse.setObjectName("collapseButton")
+        collapse.setText("◀")
+        collapse.setToolTip("Contraer el panel de parámetros")
+        collapse.setCursor(Qt.CursorShape.PointingHandCursor)
+        collapse.clicked.connect(lambda: self.set_params_visible(False))
+        header.addWidget(collapse)
+        params_layout.addLayout(header)
+        params_layout.addWidget(self.inputs, 1)
+        self.splitter.addWidget(self.params_card)
 
         # --- Resultados -------------------------------------------------
         right = QWidget()
+        right.setObjectName("workArea")
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(12)
 
         run_bar = QHBoxLayout()
-        run_bar.setSpacing(16)
+        run_bar.setSpacing(10)
+        self.expand_button = QToolButton()
+        self.expand_button.setObjectName("collapseButton")
+        self.expand_button.setText("▶  Parámetros")
+        self.expand_button.setToolTip("Mostrar el panel de parámetros")
+        self.expand_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.expand_button.setMinimumHeight(40)
+        self.expand_button.clicked.connect(lambda: self.set_params_visible(True))
+        self.expand_button.setVisible(False)
+        run_bar.addWidget(self.expand_button)
+
         self.run_button = QPushButton("Correr simulación")
-        self.run_button.setObjectName("runButton")  # el estilo vive en la hoja Ikalon
-        self.run_button.setMinimumHeight(42)
+        self.run_button.setObjectName("runButton")  # el estilo vive en la hoja
+        self.run_button.setMinimumHeight(40)
+        self.run_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.run_button.clicked.connect(self.run_simulation)
         run_bar.addWidget(self.run_button)
-
-        # La barra muestra el porcentaje: una corrida de 200.000 caminos tarda
-        # lo suficiente como para que "está corriendo" no baste.
-        self.progress = QProgressBar()
-        self.progress.setVisible(False)
-        self.progress.setTextVisible(True)
-        self.progress.setFormat("%p%")
-        self.progress.setMinimumHeight(20)
-        self.progress.setMaximumHeight(20)
-        run_bar.addWidget(self.progress, 1)
 
         # La acción se crea aquí porque el botón y la entrada de menú comparten
         # el mismo estado habilitado: sin resultado no hay nada que exportar.
@@ -213,7 +262,8 @@ class MainWindow(QMainWindow):
         self.export_action.triggered.connect(self.export_report)
 
         self.export_button = QPushButton("Exportar PDF")
-        self.export_button.setMinimumHeight(42)
+        self.export_button.setObjectName("exportButton")
+        self.export_button.setMinimumHeight(40)
         self.export_button.setEnabled(False)
         self.export_button.setToolTip(
             "Genera el informe de la última corrida. Se habilita al simular."
@@ -222,73 +272,84 @@ class MainWindow(QMainWindow):
         self.export_action.changed.connect(
             lambda: self.export_button.setEnabled(self.export_action.isEnabled())
         )
-        run_bar.insertWidget(1, self.export_button)  # junto a «Correr», antes de la barra
+        run_bar.addWidget(self.export_button)
+
+        # La barra muestra el porcentaje: una corrida de 200.000 caminos tarda
+        # lo suficiente como para que "está corriendo" no baste.
+        self.progress = QProgressBar()
+        self.progress.setVisible(False)
+        self.progress.setTextVisible(True)
+        self.progress.setFormat("%p%")
+        self.progress.setFixedHeight(16)
+        self.progress.setMaximumWidth(260)
+        run_bar.addSpacing(6)
+        run_bar.addWidget(self.progress, 1)
 
         self.status = QLabel("")
-        self.status.setStyleSheet(f"color: {INK};")
+        self.status.setObjectName("statusLabel")
         run_bar.addWidget(self.status, 2)
+
+        wordmark = wordmark_pixmap(24)
+        if wordmark is not None:
+            wordmark_label = QLabel()
+            wordmark_label.setObjectName("statusLabel")  # fondo transparente
+            wordmark_label.setPixmap(wordmark)
+            run_bar.addWidget(wordmark_label)
         right_layout.addLayout(run_bar)
+
+        self.kpis = KpiRow()
+        self.kpis.setObjectName("workArea")
+        right_layout.addWidget(self.kpis)
 
         # Aviso fijo de moneda: con la vista en COP activa (se activa en
         # Ajustes) tiene que ser imposible leer una cifra sin saber que está en
         # pesos. Oculto en la vista normal, así que quien no la usa no ve nada.
         self.currency_banner = QLabel("")
+        self.currency_banner.setObjectName("currencyBanner")
         self.currency_banner.setWordWrap(True)
-        self.currency_banner.setStyleSheet(
-            f"background-color: {NAVY}; color: white; font-weight: 600; padding: 7px 12px;"
-        )
         self.currency_banner.setVisible(False)
         right_layout.addWidget(self.currency_banner)
 
+        results_card = QFrame()
+        results_card.setObjectName("card")
+        results_layout = QVBoxLayout(results_card)
+        results_layout.setContentsMargins(10, 6, 10, 10)
         self.results = ResultsPanel(settings=self.settings)
-        right_layout.addWidget(self.results, 1)
+        self.results.setObjectName("resultsTabs")
+        self.results.setDocumentMode(True)
+        results_layout.addWidget(self.results)
+        right_layout.addWidget(results_card, 1)
 
-        splitter.addWidget(right)
+        self.splitter.addWidget(right)
         # Los resultados son el foco de la pantalla; las entradas se consultan y
-        # se dejan quietas. Los factores de estiramiento no bastan: hay que fijar
-        # los tamaños iniciales o Qt reparte según el ancho que pide cada panel,
-        # y las tablas de entrada piden mucho.
+        # se dejan quietas. Hay que fijar los tamaños iniciales o Qt reparte
+        # según el ancho que pide cada panel, y las tablas de entrada piden mucho.
         # Las tablas de entrada (pesos, flujos con siete columnas) necesitan
         # ancho real: con 500 px salían recortadas.
-        self.inputs.setMinimumWidth(560)
+        self.params_card.setMinimumWidth(560)
         right.setMinimumWidth(620)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([700, 800])
-        layout.addWidget(splitter)
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setSizes([560, 1000])
 
         self.setCentralWidget(central)
         self.statusBar().showMessage(
             f"Librería de supuestos: {library.library_path()}"
         )
 
-    def _build_brand_bar(self) -> QHBoxLayout:
-        """Símbolo a la izquierda y wordmark a la derecha, como manda el manual.
+    def set_params_visible(self, visible: bool):
+        """Contrae o muestra el panel de parámetros para dar aire a los resultados."""
+        self.params_card.setVisible(visible)
+        self.expand_button.setVisible(not visible)
 
-        Sin franja de color de fondo y sin marco: es solo la marca sobre blanco.
-        """
-        bar = QHBoxLayout()
-        bar.setContentsMargins(4, 2, 4, 0)
+    def _go_to_section(self, index: int):
+        self.set_params_visible(True)
+        self.inputs.setCurrentIndex(index)
 
-        symbol = symbol_pixmap(28)
-        if symbol is not None:
-            symbol_label = QLabel()
-            symbol_label.setPixmap(symbol)
-            bar.addWidget(symbol_label)
-
-        title = QLabel("Proyección patrimonial")
-        title.setStyleSheet(f"color: {NAVY}; font-size: 15px; font-weight: 600;")
-        bar.addWidget(title)
-
-        bar.addStretch(1)
-
-        wordmark = wordmark_pixmap(22)
-        if wordmark is not None:
-            wordmark_label = QLabel()
-            wordmark_label.setPixmap(wordmark)
-            bar.addWidget(wordmark_label)
-
-        return bar
+    def _update_kpis(self):
+        peso = self.scenario.peso
+        view_peso = peso if (peso is not None and self.settings.show_cop) else None
+        self.kpis.update_from(self.scenario, self.results.result, view_peso)
 
     def _build_menu(self):
         file_menu = self.menuBar().addMenu("&Archivo")
@@ -376,6 +437,7 @@ class MainWindow(QMainWindow):
             self.currency_banner.setText(f"Cifras en {unidad}")
         self.results.set_view(view_peso, self.scenario.inflation, self.scenario.goals,
                               force=scale_changed)
+        self._update_kpis()
 
     # ------------------------------------------------------------------
     def open_solver(self):
@@ -669,6 +731,7 @@ class MainWindow(QMainWindow):
     def _on_finished(self, result):
         self._run_scenario = self._pending_scenario
         self.results.show_result(result, self.settings, result.horizon)
+        self._update_kpis()
         self.run_button.setEnabled(True)
         self.export_action.setEnabled(True)
         self.progress.setVisible(False)

@@ -22,7 +22,14 @@ from PySide6.QtWidgets import (
 )
 
 from ...model.correlation import CorrelationMatrix
-from ..theme import CYAN, INK, INK_SOFT, NAVY, NEUTRAL, WHITE
+from ..theme import (
+    CYAN,
+    INK,
+    NAVY,
+    NEUTRAL,
+    NOTE_STYLE,
+    WHITE,
+)
 
 
 def _mix(start: QColor, end: QColor, t: float) -> QColor:
@@ -101,7 +108,7 @@ class CorrelationPanel(QWidget):
                 f"lo es; el ajuste máximo aplicado es de {correlations.psd_adjustment:.4f}."
             )
             note.setWordWrap(True)
-            note.setStyleSheet(f"color: {INK_SOFT};")
+            note.setStyleSheet(NOTE_STYLE)
             layout.addWidget(note)
 
         controls = QHBoxLayout()
@@ -125,7 +132,7 @@ class CorrelationPanel(QWidget):
 
         self.derived_note = QLabel("")
         self.derived_note.setWordWrap(True)
-        self.derived_note.setStyleSheet(f"color: {INK_SOFT};")
+        self.derived_note.setStyleSheet(NOTE_STYLE)
         self.derived_note.setVisible(False)
         layout.addWidget(self.derived_note)
 
